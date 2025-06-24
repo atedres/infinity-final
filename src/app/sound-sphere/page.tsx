@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { SubpageLayout } from "@/components/layout/subpage-layout";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -35,12 +36,13 @@ interface Room {
     id: string;
     creatorName: string;
     title: string;
-    participants: number;
+    participantsCount: number;
     isPublic: boolean;
 }
 
 export default function SoundSpherePage() {
     const { toast } = useToast();
+    const router = useRouter();
     const [user, setUser] = useState<User | null>(null);
 
     // Feed State
@@ -130,13 +132,13 @@ export default function SoundSpherePage() {
             return;
         }
         try {
-            await addDoc(collection(db, "audioRooms"), {
+            const newRoomRef = await addDoc(collection(db, "audioRooms"), {
                 creatorId: user.uid,
                 creatorName: user.displayName || 'Anonymous',
                 title: roomTitle,
                 description: roomDescription,
                 isPublic: isPublicRoom === "true",
-                participants: 0,
+                participantsCount: 0,
                 createdAt: serverTimestamp(),
             });
             toast({ title: "Success", description: "Your room has been created." });
@@ -144,6 +146,7 @@ export default function SoundSpherePage() {
             setRoomTitle('');
             setRoomDescription('');
             fetchRooms();
+            router.push(`/sound-sphere/${newRoomRef.id}`);
         } catch (error) {
             console.error("Error creating room:", error);
             toast({ title: "Error", description: "Failed to create room.", variant: "destructive" });
@@ -326,11 +329,13 @@ export default function SoundSpherePage() {
                                             <p className="text-sm text-muted-foreground">with {room.creatorName}</p>
                                             <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                                 <Users className="h-4 w-4" />
-                                                <span>{room.participants} listening</span>
+                                                <span>{room.participantsCount} listening</span>
                                             </div>
                                         </div>
                                     </div>
-                                    <Button className="w-full">Join Room</Button>
+                                    <Link href={`/sound-sphere/${room.id}`} passHref>
+                                        <Button className="w-full" disabled={!user}>Join Room</Button>
+                                    </Link>
                                 </CardContent>
                             </Card>
                          ))}
