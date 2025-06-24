@@ -9,7 +9,8 @@ import {
   Building,
   Infinity as InfinityIcon,
   Quote,
-  LogOut
+  LogOut,
+  User as UserIcon,
 } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -18,6 +19,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -145,6 +154,8 @@ export default function Home() {
                     role,
                     createdAt: serverTimestamp(),
                     is_admin: false,
+                    photoURL: '',
+                    bio: '',
                 });
                 toast({ title: "Success", description: "Account created successfully!"});
 
@@ -172,7 +183,7 @@ export default function Home() {
                     description = 'Invalid email or password. Please try again.';
                     break;
                 case 'auth/unauthorized-domain':
-                    description = "This app's domain is not authorized. Please add 'localhost' to the authorized domains in your Firebase project's authentication settings.";
+                    description = "This app's domain is not authorized. Please add 'localhost' (or your deployed domain) to the authorized domains in your Firebase project's authentication settings.";
                     break;
                 default:
                     description = error.message;
@@ -200,6 +211,8 @@ export default function Home() {
                     role: 'Other', // Default role
                     createdAt: serverTimestamp(),
                     is_admin: false,
+                    photoURL: user.photoURL || '',
+                    bio: '',
                 });
             }
             toast({ title: "Success", description: "Logged in with Google successfully!"});
@@ -215,7 +228,7 @@ export default function Home() {
                     description = 'An account already exists with this email. Please sign in using the original method.';
                     break;
                 case 'auth/unauthorized-domain':
-                    description = "This app's domain is not authorized. Please add 'localhost' to the authorized domains in your Firebase project's authentication settings.";
+                    description = "This app's domain is not authorized. Please add 'localhost' (or your deployed domain) to the authorized domains in your Firebase project's authentication settings.";
                     break;
                 default:
                     description = error.message;
@@ -253,13 +266,36 @@ export default function Home() {
                     <Link href="/admin-dashboard">Admin</Link>
                 </Button>
                 {user ? (
-                    <>
-                        <span className="text-sm text-muted-foreground hidden sm:inline-block">{user.email}</span>
-                        <Button variant="ghost" onClick={handleSignOut}>
-                            <LogOut className="mr-2 h-4 w-4" />
-                            Logout
-                        </Button>
-                    </>
+                   <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+                                <Avatar className="h-8 w-8">
+                                    <AvatarImage src={user.photoURL || ''} alt={user.displayName || 'User'} />
+                                    <AvatarFallback>{user.displayName?.split(' ').map(n => n[0]).join('').substring(0, 2) || user.email?.charAt(0).toUpperCase()}</AvatarFallback>
+                                </Avatar>
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent className="w-56" align="end" forceMount>
+                            <DropdownMenuLabel className="font-normal">
+                                <div className="flex flex-col space-y-1">
+                                    <p className="text-sm font-medium leading-none">{user.displayName}</p>
+                                    <p className="text-xs leading-none text-muted-foreground">{user.email}</p>
+                                </div>
+                            </DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem asChild>
+                                <Link href={`/profile/${user.uid}`}>
+                                    <UserIcon className="mr-2 h-4 w-4" />
+                                    <span>Profile</span>
+                                </Link>
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={handleSignOut}>
+                                <LogOut className="mr-2 h-4 w-4" />
+                                <span>Log out</span>
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
                 ) : (
                     <>
                         <Button variant="ghost" onClick={() => handleAuthDialogOpen('login')}>
@@ -463,5 +499,3 @@ export default function Home() {
     </div>
   );
 }
-
-    
