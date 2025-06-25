@@ -20,13 +20,16 @@ import { Button } from "@/components/ui/button";
 import { useToast } from '@/hooks/use-toast';
 import { db, auth, storage } from '@/lib/firebase';
 import { onAuthStateChanged, User, updateProfile } from 'firebase/auth';
-import { doc, getDoc, collection, getDocs, setDoc, deleteDoc, serverTimestamp, updateDoc, query, where, orderBy } from 'firebase/firestore';
+import { doc, getDoc, collection, getDocs, setDoc, deleteDoc, serverTimestamp, updateDoc, query, where, orderBy, onSnapshot, addDoc } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { UserPlus, UserCheck, Edit, Camera, Heart, MessageCircle } from 'lucide-react';
+import { UserPlus, UserCheck, Edit, Camera, Heart, MessageCircle, MessageSquare } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { cn } from '@/lib/utils';
 
 
 // Helper functions for image cropping
@@ -104,6 +107,13 @@ interface Post {
     createdAt: any;
 }
 
+interface ChatMessage {
+    id: string;
+    text: string;
+    senderId: string;
+    timestamp: any;
+}
+
 
 export default function ProfilePage() {
     const { toast } = useToast();
@@ -113,10 +123,13 @@ export default function ProfilePage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const imgRef = useRef<HTMLImageElement>(null);
     const previewCanvasRef = useRef<HTMLCanvasElement>(null);
+    const chatUnsubscribe = useRef<() => void | null>(null);
+    const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [profileUser, setProfileUser] = useState<ProfileUser | null>(null);
     const [posts, setPosts] = useState<Post[]>([]);
+    const [postCount, setPostCount] = useState(0);
     const [followerCount, setFollowerCount] = useState(0);
     const [followingCount, setFollowingCount] = useState(0);
     const [isFollowing, setIsFollowing] = useState(false);
@@ -136,6 +149,12 @@ export default function ProfilePage() {
     const [editedLastName, setEditedLastName] = useState('');
     const [editedRole, setEditedRole] = useState('');
     const [editedBio, setEditedBio] = useState('');
+    
+    // Chat state
+    const [isChatOpen, setIsChatOpen] = useState(false);
+    const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const [newMessage, setNewMessage] = useState('');
+    const [chatId, setChatId] = useState<string | null>(null);
 
     useEffect(() => {
         if (!auth) return;
@@ -191,6 +210,7 @@ export default function ProfilePage() {
                 const postsSnapshot = await getDocs(postsQuery);
                 const userPosts = postsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Post[];
                 setPosts(userPosts);
+                setPostCount(userPosts.length);
 
 
             } catch (error) {
@@ -204,6 +224,50 @@ export default function ProfilePage() {
         fetchProfileData();
 
     }, [userId, currentUser, router, toast]);
+    
+    // Create Chat ID
+    useEffect(() => {
+        if (currentUser && profileUser && currentUser.uid !== profileUser.uid) {
+            const id = [currentUser.uid, profileUser.uid].sort().join('_');
+            setChatId(id);
+        }
+    }, [currentUser, profileUser]);
+
+    // Listener for chat messages
+    useEffect(() => {
+        if (!isChatOpen || !chatId || !db) {
+            if (chatUnsubscribe.current) {
+                chatUnsubscribe.current();
+            }
+            return;
+        }
+
+        const messagesRef = collection(db, "chats", chatId, "messages");
+        const q = query(messagesRef, orderBy("timestamp", "asc"));
+
+        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+            const fetchedMessages = querySnapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            })) as ChatMessage[];
+            setMessages(fetchedMessages);
+        });
+        
+        chatUnsubscribe.current = unsubscribe;
+
+        return () => {
+            if(chatUnsubscribe.current) {
+                chatUnsubscribe.current();
+            }
+        };
+    }, [isChatOpen, chatId, db]);
+
+    // Auto-scroll chat
+    const scrollToBottom = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+    useEffect(scrollToBottom, [messages]);
+
 
     const handleFollowToggle = async () => {
         if (!db || !currentUser || !profileUser || currentUser.uid === profileUser.uid) {
@@ -359,6 +423,32 @@ export default function ProfilePage() {
         }
     };
 
+    const handleSendMessage = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!db || !currentUser || !chatId || !newMessage.trim() || !profileUser) return;
+
+        const messagesRef = collection(db, "chats", chatId, "messages");
+        
+        await addDoc(messagesRef, {
+            text: newMessage,
+            senderId: currentUser.uid,
+            timestamp: serverTimestamp(),
+        });
+        
+        const chatDocRef = doc(db, "chats", chatId);
+        await setDoc(chatDocRef, {
+            participants: [currentUser.uid, profileUser.uid],
+            participantNames: {
+                [currentUser.uid]: currentUser.displayName,
+                [profileUser.uid]: `${profileUser.firstName} ${profileUser.lastName}`
+            },
+            lastMessage: newMessage,
+            lastUpdate: serverTimestamp(),
+        }, { merge: true });
+
+        setNewMessage('');
+    };
+
     if (isLoading) {
         return <SubpageLayout title="Profile"><div className="text-center p-8">Loading profile...</div></SubpageLayout>
     }
@@ -472,18 +562,22 @@ export default function ProfilePage() {
                              <p className="text-sm text-foreground pt-2">{profileUser.role}</p>
                         </div>
 
-                         <div className="flex justify-around w-full pt-4 border-t">
-                            <div className="text-center">
+                         <div className="grid grid-cols-3 justify-around w-full pt-4 border-t divide-x">
+                            <div className="text-center px-2">
+                                <p className="font-bold text-xl">{postCount}</p>
+                                <p className="text-sm text-muted-foreground">Posts</p>
+                            </div>
+                            <div className="text-center px-2">
                                 <p className="font-bold text-xl">{followerCount}</p>
                                 <p className="text-sm text-muted-foreground">Followers</p>
                             </div>
-                            <div className="text-center">
+                            <div className="text-center px-2">
                                 <p className="font-bold text-xl">{followingCount}</p>
                                 <p className="text-sm text-muted-foreground">Following</p>
                             </div>
                         </div>
 
-                        <div className="w-full">
+                        <div className="w-full pt-2">
                            {isOwnProfile ? (
                                 <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
                                     <DialogTrigger asChild>
@@ -525,10 +619,43 @@ export default function ProfilePage() {
                                 </Dialog>
                             ) : (
                                 currentUser && (
-                                    <Button className="w-full" onClick={handleFollowToggle} disabled={!currentUser}>
-                                        {isFollowing ? <UserCheck className="mr-2 h-4 w-4" /> : <UserPlus className="mr-2 h-4 w-4" />}
-                                        {isFollowing ? 'Following' : 'Follow'}
-                                    </Button>
+                                    <div className="flex gap-2">
+                                        <Button className="flex-1" onClick={handleFollowToggle} disabled={!currentUser}>
+                                            {isFollowing ? <UserCheck className="mr-2 h-4 w-4" /> : <UserPlus className="mr-2 h-4 w-4" />}
+                                            {isFollowing ? 'Following' : 'Follow'}
+                                        </Button>
+
+                                        <Sheet open={isChatOpen} onOpenChange={setIsChatOpen}>
+                                            <SheetTrigger asChild>
+                                                <Button variant="outline" className="flex-1">
+                                                    <MessageSquare className="mr-2 h-4 w-4" /> Message
+                                                </Button>
+                                            </SheetTrigger>
+                                            <SheetContent className="flex flex-col">
+                                                <SheetHeader>
+                                                    <SheetTitle>Chat with {displayName}</SheetTitle>
+                                                </SheetHeader>
+                                                <div className="flex-1 flex flex-col overflow-y-auto">
+                                                    <ScrollArea className="flex-1 pr-4 -mr-4">
+                                                        <div className="space-y-4 py-4">
+                                                        {messages.map(message => (
+                                                            <div key={message.id} className={cn("flex w-max max-w-xs flex-col gap-1 rounded-lg px-3 py-2 text-sm",
+                                                                message.senderId === currentUser?.uid ? "ml-auto bg-primary text-primary-foreground" : "bg-muted"
+                                                            )}>
+                                                                {message.text}
+                                                            </div>
+                                                        ))}
+                                                        <div ref={messagesEndRef} />
+                                                        </div>
+                                                    </ScrollArea>
+                                                </div>
+                                                <form onSubmit={handleSendMessage} className="mt-auto flex gap-2 pt-4 border-t">
+                                                    <Input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Type a message..." autoComplete="off"/>
+                                                    <Button type="submit" disabled={!newMessage.trim()}>Send</Button>
+                                                </form>
+                                            </SheetContent>
+                                        </Sheet>
+                                    </div>
                                 )
                             )}
                         </div>
@@ -555,8 +682,8 @@ export default function ProfilePage() {
                                        <p className="text-foreground/90">{post.content}</p>
                                        <div className="flex items-center justify-between text-sm text-muted-foreground border-t pt-3">
                                             <div className="flex items-center gap-4">
-                                                <span className="flex items-center gap-1"><Heart className="h-4 w-4"/> {post.likes}</span>
-                                                <span className="flex items-center gap-1"><MessageCircle className="h-4 w-4"/> {post.comments}</span>
+                                                <button className="flex items-center gap-1 hover:text-primary"><Heart className="h-4 w-4"/> {post.likes}</button>
+                                                <button className="flex items-center gap-1 hover:text-primary"><MessageCircle className="h-4 w-4"/> {post.comments}</button>
                                             </div>
                                            <span>{post.createdAt ? new Date(post.createdAt.toDate()).toLocaleDateString() : ''}</span>
                                        </div>
@@ -572,3 +699,5 @@ export default function ProfilePage() {
         </SubpageLayout>
     );
 }
+
+    
