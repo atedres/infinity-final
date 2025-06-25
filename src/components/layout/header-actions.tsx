@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import {
   LogOut,
@@ -30,6 +30,7 @@ import { doc, setDoc, getDoc, serverTimestamp, collection, query, where, onSnaps
 import { auth, db, googleProvider } from "@/lib/firebase";
 import { formatDistanceToNow } from 'date-fns';
 import { ThemeToggle } from './theme-toggle';
+import { useNotificationSound } from '@/hooks/use-notification-sound';
 
 
 interface Notification {
@@ -57,11 +58,17 @@ export function HeaderActions() {
     const [isAuthDialogOpen, setIsAuthDialogOpen] = useState(false);
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [hasUnread, setHasUnread] = useState(false);
+    const playNotificationSound = useNotificationSound('/notification.mp3');
+    const isInitialNotificationsLoad = useRef(true);
 
     useEffect(() => {
         if (!auth) return;
         const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
             setUser(currentUser);
+            if (!currentUser) {
+                // Reset flag on logout
+                isInitialNotificationsLoad.current = true;
+            }
         });
         return () => unsubscribe();
     }, []);
@@ -69,12 +76,18 @@ export function HeaderActions() {
     useEffect(() => {
         if (!user || !db) {
             setNotifications([]);
+            setHasUnread(false);
             return;
         }
         
         const q = query(collection(db, "notifications"), where("recipientId", "==", user.uid), orderBy("createdAt", "desc"));
         
         const unsubscribe = onSnapshot(q, (snapshot) => {
+            // Play sound only for new documents after the initial load
+            if (!isInitialNotificationsLoad.current && snapshot.docChanges().some(change => change.type === 'added')) {
+                playNotificationSound();
+            }
+
             const fetchedNotifications = snapshot.docs.map(doc => {
                 const data = doc.data();
                 const id = doc.id;
@@ -86,11 +99,11 @@ export function HeaderActions() {
                 switch (data.type) {
                     case 'like':
                         text = `${data.actorName} liked your post.`;
-                        href = `/sound-sphere#post-${data.entityId}`;
+                        href = `/sound-sphere?tab=feed#post-${data.entityId}`;
                         break;
                     case 'comment':
                         text = `${data.actorName} commented on your post.`;
-                        href = `/sound-sphere#post-${data.entityId}`;
+                        href = `/sound-sphere?tab=feed#post-${data.entityId}`;
                         break;
                     case 'follow':
                         text = `${data.actorName} started following you.`;
@@ -111,10 +124,15 @@ export function HeaderActions() {
             
             setNotifications(fetchedNotifications);
             setHasUnread(fetchedNotifications.some(n => !n.read));
+            
+            // Mark initial load as complete
+            if (isInitialNotificationsLoad.current) {
+                isInitialNotificationsLoad.current = false;
+            }
         });
 
         return () => unsubscribe();
-    }, [user]);
+    }, [user, playNotificationSound]);
 
     const handleOpenNotifications = async (open: boolean) => {
         if (open && hasUnread && db && user) {

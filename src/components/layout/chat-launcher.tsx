@@ -13,6 +13,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { MessageSquare, Send, ArrowLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { useNotificationSound } from '@/hooks/use-notification-sound';
 
 // Interfaces for our data structures
 interface Chat {
@@ -51,6 +52,14 @@ export function ChatLauncher() {
     const [newMessage, setNewMessage] = useState('');
     const [selectedChat, setSelectedChat] = useState<EnrichedChat | null>(null);
     const messagesEndRef = useRef<HTMLDivElement | null>(null);
+    const playMessageSound = useNotificationSound('/notification.mp3');
+    const isInitialChatsLoad = useRef(true);
+
+    const conversationsRef = useRef(conversations);
+    conversationsRef.current = conversations;
+    const selectedChatRef = useRef(selectedChat);
+    selectedChatRef.current = selectedChat;
+
 
     // Listen for auth changes
     useEffect(() => {
@@ -64,6 +73,7 @@ export function ChatLauncher() {
                 setSelectedChat(null);
                 setIsOpen(false);
                 setTotalUnread(0);
+                isInitialChatsLoad.current = true;
             }
         });
         return () => unsubscribe();
@@ -80,6 +90,25 @@ export function ChatLauncher() {
         );
 
         const unsubscribe = onSnapshot(chatsQuery, async (snapshot) => {
+
+            if (!isInitialChatsLoad.current) {
+                const hasNewMessageForMe = snapshot.docChanges().some(change => {
+                    if (change.type === 'modified') {
+                        const oldChat = conversationsRef.current.find(c => c.id === change.doc.id);
+                        const oldUnread = oldChat?.unreadCount || 0;
+                        const newUnread = change.doc.data().unreadCounts?.[currentUser.uid] || 0;
+                        
+                        return newUnread > oldUnread && selectedChatRef.current?.id !== change.doc.id;
+                    }
+                    return false;
+                });
+
+                if (hasNewMessageForMe) {
+                    playMessageSound();
+                }
+            }
+
+
             const chatsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Chat));
             let unreadSum = 0;
             
@@ -106,6 +135,10 @@ export function ChatLauncher() {
             
             setConversations(enrichedChats);
             setTotalUnread(unreadSum);
+            
+            if (isInitialChatsLoad.current) {
+                isInitialChatsLoad.current = false;
+            }
 
         }, (error) => {
             console.error("Firestore chat listener error: ", error);
@@ -126,7 +159,7 @@ export function ChatLauncher() {
         });
 
         return () => unsubscribe();
-    }, [currentUser, toast]);
+    }, [currentUser, toast, playMessageSound]);
 
     // Fetch messages when a chat is selected
     useEffect(() => {
