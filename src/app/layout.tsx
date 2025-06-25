@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
+import { ChatLauncher } from '@/components/layout/chat-launcher';
 
 export const metadata: Metadata = {
   title: 'Infinity Hub',
@@ -27,6 +28,7 @@ export default function RootLayout({
           {children}
         </div>
         <Toaster />
+        <ChatLauncher />
       </body>
     </html>
   );
