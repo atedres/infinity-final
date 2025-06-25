@@ -1,4 +1,3 @@
-
 "use client";
 
 import {
@@ -188,11 +187,11 @@ export default function Home() {
                 <div className="mx-auto grid items-start gap-8 sm:max-w-4xl sm:grid-cols-2 md:gap-12 lg:max-w-5xl lg:grid-cols-4">
                     {features.map((feature) => (
                     <Card key={feature.title} className="flex flex-col overflow-hidden transition-transform duration-300 ease-in-out hover:-translate-y-2 hover:shadow-xl">
-                        <CardHeader className="flex flex-col items-center gap-2 space-y-0 pb-2 text-center sm:flex-row sm:items-center sm:text-left sm:gap-4">
+                        <CardHeader className="flex flex-col items-center gap-2 space-y-0 pb-2 text-center md:items-start md:text-left">
                         {feature.icon}
                         <CardTitle className="font-headline text-xl">{feature.title}</CardTitle>
                         </CardHeader>
-                        <CardContent className="flex-1 text-center sm:text-left">
+                        <CardContent className="flex-1 text-center md:text-left">
                         <CardDescription>{feature.description}</CardDescription>
                         </CardContent>
                         <CardFooter>
@@ -220,10 +219,10 @@ export default function Home() {
                 <div className="grid gap-6 md:grid-cols-3">
                     {testimonials.map(testimonial => (
                         <Card key={testimonial.author}>
-                            <CardContent className="p-6 space-y-4">
-                                <Quote className="h-6 w-6 text-primary" />
+                            <CardContent className="p-6 space-y-4 text-center md:text-left">
+                                <Quote className="h-6 w-6 text-primary mx-auto md:mx-0" />
                                 <p className="text-muted-foreground">"{testimonial.quote}"</p>
-                                <div className="flex items-center gap-4 pt-4">
+                                <div className="flex items-center justify-center md:justify-start gap-4 pt-4">
                                     <Avatar>
                                         <AvatarImage src={testimonial.avatar} data-ai-hint={testimonial.dataAiHint} />
                                         <AvatarFallback>{testimonial.author.split(' ').map(n=>n[0]).join('')}</AvatarFallback>
