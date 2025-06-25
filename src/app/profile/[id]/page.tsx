@@ -2,6 +2,16 @@
 
 import { useState, useEffect, useRef, type ChangeEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import Image from 'next/image';
+import {
+  ReactCrop,
+  centerCrop,
+  makeAspectCrop,
+  type Crop,
+  type PixelCrop,
+} from 'react-image-crop';
+import 'react-image-crop/dist/ReactCrop.css';
+
 import { SubpageLayout } from "@/components/layout/subpage-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -17,6 +27,59 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 
+
+// Helper functions for image cropping
+function canvasPreview(
+  image: HTMLImageElement,
+  canvas: HTMLCanvasElement,
+  crop: PixelCrop,
+) {
+  const ctx = canvas.getContext('2d')
+
+  if (!ctx) {
+    throw new Error('No 2d context')
+  }
+  
+  const scaleX = image.naturalWidth / image.width
+  const scaleY = image.naturalHeight / image.height
+  const pixelRatio = window.devicePixelRatio
+  
+  canvas.width = Math.floor(crop.width * scaleX * pixelRatio)
+  canvas.height = Math.floor(crop.height * scaleY * pixelRatio)
+
+  ctx.scale(pixelRatio, pixelRatio)
+  ctx.imageSmoothingQuality = 'high'
+
+  const cropX = crop.x * scaleX
+  const cropY = crop.y * scaleY
+  
+  const centerX = image.naturalWidth / 2
+  const centerY = image.naturalHeight / 2
+
+  ctx.save()
+  ctx.translate(-cropX, -cropY)
+  ctx.translate(centerX, centerY)
+  ctx.translate(-centerX, -centerY)
+  ctx.drawImage(
+    image,
+    0,
+    0,
+    image.naturalWidth,
+    image.naturalHeight,
+    0,
+    0,
+    image.naturalWidth,
+    image.naturalHeight,
+  )
+
+  ctx.restore()
+}
+
+function toBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    canvas.toBlob(resolve, 'image/png');
+  });
+}
 
 interface ProfileUser {
     uid: string;
@@ -34,6 +97,8 @@ export default function ProfilePage() {
     const params = useParams();
     const userId = params.id as string;
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const imgRef = useRef<HTMLImageElement>(null);
+    const previewCanvasRef = useRef<HTMLCanvasElement>(null);
 
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [profileUser, setProfileUser] = useState<ProfileUser | null>(null);
@@ -42,6 +107,13 @@ export default function ProfilePage() {
     const [isFollowing, setIsFollowing] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [isOwnProfile, setIsOwnProfile] = useState(false);
+
+    // Crop State
+    const [imgSrc, setImgSrc] = useState('');
+    const [crop, setCrop] = useState<Crop>();
+    const [completedCrop, setCompletedCrop] = useState<PixelCrop>();
+    const [isCropDialogOpen, setIsCropDialogOpen] = useState(false);
+    const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
 
     // Edit Dialog State
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -141,9 +213,15 @@ export default function ProfilePage() {
     };
     
     const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files && e.target.files[0]) {
-            const file = e.target.files[0];
-            handlePictureUpload(file);
+        if (e.target.files && e.target.files.length > 0) {
+            setCrop(undefined); // Reset crop
+            const reader = new FileReader();
+            reader.addEventListener('load', () =>
+                setImgSrc(reader.result?.toString() || ''),
+            );
+            reader.readAsDataURL(e.target.files[0]);
+            setIsCropDialogOpen(true);
+            e.target.value = ''; // Allow re-selecting the same file
         }
     };
 
@@ -183,6 +261,47 @@ export default function ProfilePage() {
             }
             toast({ title: 'Upload Failed', description, variant: 'destructive' });
         }
+    };
+
+    function onImageLoad(e: React.SyntheticEvent<HTMLImageElement>) {
+        const { width, height } = e.currentTarget;
+        const crop = centerCrop(
+            makeAspectCrop(
+                {
+                    unit: '%',
+                    width: 90,
+                },
+                1,
+                width,
+                height,
+            ),
+            width,
+            height,
+        );
+        setCrop(crop);
+        setCompletedCrop(undefined);
+    }
+    
+    const handleSaveCrop = async () => {
+        const image = imgRef.current;
+        const previewCanvas = previewCanvasRef.current;
+        if (!image || !previewCanvas || !completedCrop) {
+             toast({ title: 'Error', description: 'Cannot process crop.', variant: 'destructive' });
+            return;
+        }
+        
+        canvasPreview(image, previewCanvas, completedCrop);
+        const blob = await toBlob(previewCanvas);
+        
+        if (!blob) {
+            toast({ title: 'Error', description: 'Could not create cropped image.', variant: 'destructive' });
+            return;
+        }
+        
+        const file = new File([blob], `profile_${currentUser?.uid || Date.now()}.png`, { type: 'image/png' });
+
+        await handlePictureUpload(file);
+        setIsCropDialogOpen(false);
     };
     
     const handleProfileUpdate = async (e: React.FormEvent) => {
@@ -230,14 +349,76 @@ export default function ProfilePage() {
 
     return (
         <SubpageLayout title={`${displayName}'s Profile`}>
+             <Dialog open={isCropDialogOpen} onOpenChange={setIsCropDialogOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Crop your new picture</DialogTitle>
+                        <DialogDescription>
+                            Adjust the image to fit perfectly.
+                        </DialogDescription>
+                    </DialogHeader>
+                    {imgSrc && (
+                        <div className="flex justify-center">
+                            <ReactCrop
+                                crop={crop}
+                                onChange={(_, percentCrop) => setCrop(percentCrop)}
+                                onComplete={(c) => setCompletedCrop(c)}
+                                aspect={1}
+                                minWidth={100}
+                                minHeight={100}
+                                circularCrop
+                            >
+                                <img
+                                    ref={imgRef}
+                                    alt="Crop me"
+                                    src={imgSrc}
+                                    style={{ maxHeight: '70vh' }}
+                                    onLoad={onImageLoad}
+                                />
+                            </ReactCrop>
+                        </div>
+                    )}
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsCropDialogOpen(false)}>Cancel</Button>
+                        <Button onClick={handleSaveCrop} disabled={!completedCrop}>Save Picture</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {completedCrop && (
+              <canvas
+                ref={previewCanvasRef}
+                style={{
+                  display: 'none',
+                  objectFit: 'contain',
+                  width: completedCrop.width,
+                  height: completedCrop.height,
+                }}
+              />
+            )}
+
             <div className="flex flex-col items-center gap-8 md:flex-row md:items-start">
                 <Card className="w-full md:w-1/3 text-center">
                     <CardContent className="p-6 flex flex-col items-center gap-4">
                         <div className="relative">
-                            <Avatar className="h-24 w-24 border-2 border-primary">
-                                <AvatarImage src={profileUser.photoURL || `https://placehold.co/96x96.png`} data-ai-hint="person portrait"/>
-                                <AvatarFallback className="text-3xl">{profileUser.firstName?.[0]}{profileUser.lastName?.[0]}</AvatarFallback>
-                            </Avatar>
+                            <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
+                                <DialogTrigger asChild>
+                                    <Avatar className="h-24 w-24 border-2 border-primary cursor-pointer hover:opacity-90 transition-opacity">
+                                        <AvatarImage src={profileUser.photoURL || `https://placehold.co/96x96.png`} data-ai-hint="person portrait"/>
+                                        <AvatarFallback className="text-3xl">{profileUser.firstName?.[0]}{profileUser.lastName?.[0]}</AvatarFallback>
+                                    </Avatar>
+                                </DialogTrigger>
+                                <DialogContent className="max-w-md p-0 bg-transparent border-none shadow-none">
+                                     <Image
+                                        src={profileUser.photoURL || `https://placehold.co/512x512.png`}
+                                        alt="Profile Picture"
+                                        width={512}
+                                        height={512}
+                                        className="rounded-lg object-cover aspect-square"
+                                        data-ai-hint="person portrait"
+                                    />
+                                </DialogContent>
+                            </Dialog>
                             {isOwnProfile && (
                                 <>
                                     <input
@@ -350,5 +531,3 @@ export default function ProfilePage() {
         </SubpageLayout>
     );
 }
-
-    
