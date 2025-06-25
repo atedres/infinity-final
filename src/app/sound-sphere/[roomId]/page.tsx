@@ -11,7 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDoc, collection, onSnapshot, setDoc, deleteDoc, updateDoc, getDocs, query, where, addDoc } from 'firebase/firestore';
-import { Mic, MicOff, LogOut, XCircle, Hand, Check, X } from 'lucide-react';
+import { Mic, MicOff, LogOut, XCircle, Hand, Check, X, Users, Headphones } from 'lucide-react';
 import Peer from 'simple-peer';
 import type { Instance as PeerInstance } from 'simple-peer';
 import 'webrtc-adapter';
@@ -114,7 +114,7 @@ export default function AudioRoomPage() {
 
             unsubParticipants();
             unsubSignals();
-unsubRoom();
+            unsubRoom();
             unsubRequests();
 
             const roomRef = doc(db, "audioRooms", roomId);
@@ -365,6 +365,9 @@ unsubRoom();
     const myRole = myParticipantData?.role;
 
     const canSpeak = myRole === 'creator' || myRole === 'speaker';
+    
+    const speakers = participants.filter(p => p.role === 'creator' || p.role === 'speaker');
+    const listeners = participants.filter(p => p.role === 'listener');
 
     return (
         <SubpageLayout title={room.title}>
@@ -372,35 +375,8 @@ unsubRoom();
             <div className="mx-auto max-w-4xl text-center space-y-8">
                 <p className="text-muted-foreground">{room.description}</p>
                 
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Participants ({participants.length})</CardTitle>
-                    </CardHeader>
-                    <CardContent className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-6">
-                        {participants.map(p => (
-                            <div key={p.id} className="relative flex flex-col items-center gap-2">
-                                 <Avatar className={`h-20 w-20 border-4 ${(p.role === 'creator' || p.role === 'speaker') && !p.isMuted ? 'border-green-500 animate-pulse' : 'border-transparent'}`}>
-                                    <AvatarImage src={p.avatar} data-ai-hint="person portrait"/>
-                                    <AvatarFallback>{p.name?.[0]}</AvatarFallback>
-                                </Avatar>
-                                {(p.role === 'creator' || p.role === 'speaker') && p.isMuted && (
-                                    <div className="absolute top-1 right-1 bg-slate-700 rounded-full p-1 border-2 border-background">
-                                        <MicOff className="h-3 w-3 text-slate-100" />
-                                    </div>
-                                )}
-                                 {p.role === 'listener' && (
-                                    <div className="absolute top-1 right-1 bg-slate-700 rounded-full p-1 border-2 border-background">
-                                        <MicOff className="h-3 w-3 text-slate-100" />
-                                    </div>
-                                )}
-                                <p className="font-medium text-sm truncate w-full">{p.name}</p>
-                            </div>
-                        ))}
-                    </CardContent>
-                </Card>
-
-                {isCreator && speakingRequests.length > 0 && (
-                     <Card>
+                 {isCreator && speakingRequests.length > 0 && (
+                     <Card className="border-primary">
                         <CardHeader>
                             <CardTitle>Speaking Requests</CardTitle>
                             <CardDescription>Accept or deny requests to speak from listeners.</CardDescription>
@@ -429,6 +405,52 @@ unsubRoom();
                     </Card>
                 )}
 
+                <Card>
+                    <CardHeader className="flex flex-row items-center gap-2">
+                        <Mic className="h-5 w-5 text-primary" />
+                        <CardTitle>Speakers ({speakers.length})</CardTitle>
+                    </CardHeader>
+                    <CardContent className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-6">
+                        {speakers.map(p => (
+                            <div key={p.id} className="relative flex flex-col items-center gap-2">
+                                 <Avatar className={`h-20 w-20 border-4 ${!p.isMuted ? 'border-green-500 animate-pulse' : 'border-transparent'}`}>
+                                    <AvatarImage src={p.avatar} data-ai-hint="person portrait"/>
+                                    <AvatarFallback>{p.name?.[0]}</AvatarFallback>
+                                </Avatar>
+                                {p.isMuted && (
+                                    <div className="absolute top-1 right-1 bg-slate-700 rounded-full p-1 border-2 border-background">
+                                        <MicOff className="h-3 w-3 text-slate-100" />
+                                    </div>
+                                )}
+                                <p className="font-medium text-sm truncate w-full">{p.name}</p>
+                            </div>
+                        ))}
+                         {speakers.length === 0 && <p className="text-muted-foreground col-span-full text-center">No speakers yet.</p>}
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader className="flex flex-row items-center gap-2">
+                        <Headphones className="h-5 w-5 text-muted-foreground" />
+                        <CardTitle>Listeners ({listeners.length})</CardTitle>
+                    </CardHeader>
+                    <CardContent className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-6">
+                        {listeners.map(p => (
+                            <div key={p.id} className="relative flex flex-col items-center gap-2">
+                                 <Avatar className="h-20 w-20">
+                                    <AvatarImage src={p.avatar} data-ai-hint="person portrait"/>
+                                    <AvatarFallback>{p.name?.[0]}</AvatarFallback>
+                                </Avatar>
+                                 <div className="absolute top-1 right-1 bg-slate-700 rounded-full p-1 border-2 border-background">
+                                    <MicOff className="h-3 w-3 text-slate-100" />
+                                </div>
+                                <p className="font-medium text-sm truncate w-full">{p.name}</p>
+                            </div>
+                        ))}
+                        {listeners.length === 0 && <p className="text-muted-foreground col-span-full text-center">No listeners yet.</p>}
+                    </CardContent>
+                </Card>
+
                 <div className="flex justify-center gap-4">
                      {canSpeak ? (
                         <Button
@@ -446,6 +468,7 @@ unsubRoom();
                             size="lg"
                             onClick={handleRequestToSpeak}
                             disabled={hasRequested}
+                            variant="outline"
                          >
                             <Hand className="mr-2 h-5 w-5" />
                             {hasRequested ? 'Request Sent' : 'Request to Speak'}
@@ -466,3 +489,4 @@ unsubRoom();
         </SubpageLayout>
     );
 }
+
