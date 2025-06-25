@@ -55,6 +55,11 @@ const AudioPlayer = ({ stream }: { stream: MediaStream }) => {
     return <audio ref={ref} autoPlay playsInline />;
 };
 
+const iceServers = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+];
+
 
 export default function AudioRoomPage() {
     const { toast } = useToast();
@@ -211,7 +216,12 @@ export default function AudioRoomPage() {
 
                 for (const participant of latestParticipants) {
                     if (participant.id !== myId && !peersRef.current[participant.id]) {
-                        const peer = new Peer({ initiator: myId > participant.id, trickle: false, stream: localStream! });
+                        const peer = new Peer({
+                             initiator: myId > participant.id,
+                             trickle: false,
+                             stream: localStream!,
+                             config: { iceServers }
+                        });
                         
                         peer.on('signal', async (signalData) => {
                             await addDoc(collection(db, "audioRooms", roomId, "signals"), {
@@ -224,6 +234,15 @@ export default function AudioRoomPage() {
                                 if (prev.some(s => s.peerId === participant.id)) return prev;
                                 return [...prev, { peerId: participant.id, stream }];
                              });
+                        });
+                        
+                        peer.on('error', (err) => {
+                             console.error(`[PEER ERROR] to ${participant.id}:`, err);
+                             if (peersRef.current[participant.id]) {
+                                peersRef.current[participant.id].destroy();
+                                delete peersRef.current[participant.id];
+                                setRemoteStreams(prev => prev.filter(s => s.peerId !== participant.id));
+                            }
                         });
                         
                         peer.on('close', () => {
