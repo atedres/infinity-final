@@ -59,6 +59,10 @@ interface IncomingCall {
 const iceServers = [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:stun.services.mozilla.com' },
 ];
 
 const AudioPlayer = ({ stream }: { stream: MediaStream }) => {
@@ -589,9 +593,9 @@ export function ChatLauncher() {
         return (
             <Dialog open={callState === 'active' || callState === 'calling'}>
                 <DialogContent className="sm:max-w-xs" onInteractOutside={(e) => e.preventDefault()}>
-                    <DialogHeader className="sr-only">
-                        <DialogTitle>Voice call with {name}</DialogTitle>
-                        <DialogDescription>An active voice call. You can mute your microphone or end the call.</DialogDescription>
+                    <DialogHeader>
+                         <DialogTitle className="sr-only">Voice call with {name}</DialogTitle>
+                        <DialogDescription className="sr-only">An active voice call. You can mute your microphone or end the call.</DialogDescription>
                     </DialogHeader>
                     <div className="flex flex-col items-center justify-center gap-4 py-8">
                         <Avatar className="h-24 w-24 border-2 border-primary">

@@ -64,6 +64,10 @@ const AudioPlayer = ({ stream }: { stream: MediaStream }) => {
 const iceServers = [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:stun.services.mozilla.com' },
 ];
 
 export default function AudioRoomPage() {
@@ -150,29 +154,33 @@ export default function AudioRoomPage() {
             unsubRequests();
             
             if (!db) return;
+            const participantRef = doc(db, "audioRooms", roomId, "participants", myId);
+            const roomRef = doc(db, "audioRooms", roomId);
 
             try {
-                const participantRef = doc(db, "audioRooms", roomId, "participants", myId);
-                await deleteDoc(participantRef).catch(() => {}); // Try to delete, ignore if it's already gone
+                // Ensure the participant document is deleted.
+                await deleteDoc(participantRef);
 
-                const roomRef = doc(db, "audioRooms", roomId);
+                // After deleting, check if the room should be deleted.
                 const roomSnap = await getDoc(roomRef);
-
                 if (roomSnap.exists()) {
                     const participantsCollectionRef = collection(roomRef, "participants");
                     const remainingParticipantsSnap = await getDocs(participantsCollectionRef);
-                    
+
                     if (remainingParticipantsSnap.size === 0) {
                         console.log(`[CLEANUP] Room ${roomId} is empty, deleting.`);
                         await deleteDoc(roomRef);
                     } else {
+                        // Update count if others remain.
                         await updateDoc(roomRef, { participantsCount: remainingParticipantsSnap.size });
                     }
-                } else {
-                    console.log(`[CLEANUP] Room ${roomId} already deleted.`);
                 }
             } catch (error) {
-                console.error("[CLEANUP] Error during firestore cleanup: ", error);
+                // It's possible the room was already deleted by another user's cleanup.
+                // We only log errors that are not 'not-found'.
+                if (error instanceof Error && (error as any).code !== 'not-found') {
+                    console.error("[CLEANUP] Error during firestore cleanup: ", error);
+                }
             }
         };
 
