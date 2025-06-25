@@ -10,19 +10,32 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Mic, Users, MessageCircle, Heart, Share2, PlusCircle, UserPlus, Send, Newspaper, Radio } from "lucide-react";
+import { Mic, Users, MessageCircle, Heart, Share2, PlusCircle, UserPlus, Send, Newspaper, Radio, MoreHorizontal, Edit, Trash2, Repeat } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useToast } from '@/hooks/use-toast';
 import { db, auth } from '@/lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, addDoc, getDocs, serverTimestamp, query, orderBy, where, doc, setDoc, deleteDoc, getDoc, updateDoc, increment } from 'firebase/firestore';
+import { collection, addDoc, getDocs, serverTimestamp, query, orderBy, where, doc, setDoc, deleteDoc, getDoc, updateDoc, increment, Timestamp } from 'firebase/firestore';
 import { formatDistanceToNow } from 'date-fns';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
 // Types
+interface OriginalPost {
+    id: string;
+    authorId: string;
+    authorName: string;
+    authorHandle: string;
+    authorAvatar: string;
+    content: string;
+    createdAt: Timestamp;
+}
+
 interface Post {
     id: string;
     authorId: string;
@@ -32,8 +45,11 @@ interface Post {
     content: string;
     likes: number;
     comments: number;
-    createdAt: any;
+    createdAt: Timestamp;
+    isRepost?: boolean;
+    originalPost?: OriginalPost;
 }
+
 
 interface Room {
     id: string;
@@ -44,12 +60,12 @@ interface Room {
 }
 
 interface Comment {
-    id: string;
+    id:string;
     authorId: string;
     authorName: string;
     authorAvatar: string;
     text: string;
-    createdAt: any;
+    createdAt: Timestamp;
 }
 
 
@@ -66,6 +82,16 @@ export default function SoundSpherePage() {
     const [commentingOn, setCommentingOn] = useState<string | null>(null);
     const [commentContent, setCommentContent] = useState('');
     const [postComments, setPostComments] = useState<Comment[]>([]);
+    
+    // Dialog states
+    const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+    const [postToDelete, setPostToDelete] = useState<Post | null>(null);
+    const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+    const [postToEdit, setPostToEdit] = useState<Post | null>(null);
+    const [editedContent, setEditedContent] = useState('');
+    const [isRepostDialogOpen, setIsRepostDialogOpen] = useState(false);
+    const [postToRepost, setPostToRepost] = useState<Post | null>(null);
+    const [repostComment, setRepostComment] = useState('');
 
 
     // Rooms State
@@ -312,183 +338,421 @@ export default function SoundSpherePage() {
             toast({ title: "Error", description: "Could not post comment.", variant: "destructive"});
         }
     };
+    
+    const handleDeletePost = async () => {
+        if (!db || !user || !postToDelete) return;
+        if (user.uid !== postToDelete.authorId) {
+            toast({ title: "Error", description: "You can only delete your own posts.", variant: "destructive" });
+            return;
+        }
+
+        try {
+            await deleteDoc(doc(db, "posts", postToDelete.id));
+            toast({ title: "Post Deleted", description: "Your post has been successfully removed." });
+            fetchPosts(user.uid);
+        } catch (error) {
+            console.error("Error deleting post:", error);
+            toast({ title: "Error", description: "Failed to delete post.", variant: "destructive" });
+        } finally {
+            setIsDeleteDialogOpen(false);
+            setPostToDelete(null);
+        }
+    };
+    
+    const handleUpdatePost = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!db || !user || !postToEdit || !editedContent.trim()) return;
+        
+        try {
+            const postRef = doc(db, "posts", postToEdit.id);
+            await updateDoc(postRef, { content: editedContent });
+            toast({ title: "Post Updated", description: "Your changes have been saved." });
+            fetchPosts(user.uid);
+        } catch (error) {
+            console.error("Error updating post:", error);
+            toast({ title: "Error", description: "Failed to update post.", variant: "destructive" });
+        } finally {
+            setIsEditDialogOpen(false);
+            setPostToEdit(null);
+            setEditedContent('');
+        }
+    };
+
+    const handleRepost = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!db || !user || !postToRepost) return;
+
+        try {
+            await addDoc(collection(db, "posts"), {
+                authorId: user.uid,
+                authorName: user.displayName || 'Anonymous User',
+                authorHandle: `@${user.email?.split('@')[0] || user.uid.substring(0, 5)}`,
+                authorAvatar: user.photoURL || `https://placehold.co/40x40.png`,
+                content: repostComment, // User's new comment
+                likes: 0,
+                comments: 0,
+                createdAt: serverTimestamp(),
+                isRepost: true,
+                originalPost: {
+                    id: postToRepost.id,
+                    authorId: postToRepost.authorId,
+                    authorName: postToRepost.authorName,
+                    authorHandle: postToRepost.authorHandle,
+                    authorAvatar: postToRepost.authorAvatar,
+                    content: postToRepost.content,
+                    createdAt: postToRepost.createdAt
+                }
+            });
+
+            toast({ title: "Success", description: "Successfully reposted!" });
+            fetchPosts(user.uid);
+        } catch (error) {
+            console.error("Error reposting:", error);
+            toast({ title: "Error", description: "Failed to repost.", variant: "destructive" });
+        } finally {
+            setIsRepostDialogOpen(false);
+            setPostToRepost(null);
+            setRepostComment('');
+        }
+    };
 
 
     return (
         <SubpageLayout title="Sound Sphere">
-            <Tabs defaultValue="feed" className="w-full">
-                <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="feed"><Newspaper className="mr-2 h-4 w-4" />Post Feed</TabsTrigger>
-                    <TabsTrigger value="rooms"><Radio className="mr-2 h-4 w-4" />Audio Rooms</TabsTrigger>
-                </TabsList>
-                <TabsContent value="feed" className="mt-6 space-y-6">
-                    <Card>
-                        <CardHeader>
-                            <h3 className="text-lg font-medium">Create a Post</h3>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            <Textarea 
-                                placeholder="What's on your mind? Share your challenges, wins, or questions..." 
-                                value={newPostContent}
-                                onChange={(e) => setNewPostContent(e.target.value)}
-                                disabled={!user}
-                            />
-                            <Button onClick={handleCreatePost} disabled={!user || !newPostContent.trim()}>Post to Sphere</Button>
-                        </CardContent>
-                    </Card>
+            <TooltipProvider>
+                <Tabs defaultValue="feed" className="w-full">
+                    <TabsList className="grid w-full grid-cols-2">
+                        <TabsTrigger value="feed"><Newspaper className="mr-2 h-4 w-4" />Post Feed</TabsTrigger>
+                        <TabsTrigger value="rooms"><Radio className="mr-2 h-4 w-4" />Audio Rooms</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="feed" className="mt-6 space-y-6">
+                        <Card>
+                            <CardHeader>
+                                <h3 className="text-lg font-medium">Create a Post</h3>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <Textarea 
+                                    placeholder="What's on your mind? Share your challenges, wins, or questions..." 
+                                    value={newPostContent}
+                                    onChange={(e) => setNewPostContent(e.target.value)}
+                                    disabled={!user}
+                                />
+                                <Button onClick={handleCreatePost} disabled={!user || !newPostContent.trim()}>Post to Sphere</Button>
+                            </CardContent>
+                        </Card>
 
-                    <div className="space-y-4">
-                        {posts.map((post) => (
-                            <Card key={post.id} id={`post-${post.id}`}>
-                                <CardContent className="p-6">
-                                    <div className="flex items-start gap-4">
-                                        <Link href={`/profile/${post.authorId}`}>
-                                            <Avatar>
-                                                <AvatarImage src={post.authorAvatar} data-ai-hint="person portrait"/>
-                                                <AvatarFallback>{post.authorName.charAt(0)}</AvatarFallback>
-                                            </Avatar>
-                                        </Link>
-                                        <div className="w-full">
-                                            <div className="flex items-center justify-between">
-                                                <div>
-                                                    <Link href={`/profile/${post.authorId}`} className="font-semibold hover:underline">{post.authorName}</Link>
-                                                    <span className="text-sm text-muted-foreground ml-2">{post.authorHandle}</span>
+                        <div className="space-y-4">
+                            {posts.map((post) => {
+                                const isPostOwner = user && user.uid === post.authorId;
+                                const isEditable = post.createdAt && (new Date().getTime() - post.createdAt.toDate().getTime()) < 15 * 60 * 1000;
+                                
+                                return (
+                                <Card key={post.id} id={`post-${post.id}`}>
+                                    <CardContent className="p-6">
+                                        {post.isRepost && post.originalPost && (
+                                            <div className="text-sm text-muted-foreground mb-2 flex items-center gap-2">
+                                                <Repeat className="h-4 w-4"/>
+                                                <span>Reposted by <Link href={`/profile/${post.authorId}`} className="font-semibold text-foreground hover:underline">{post.authorName}</Link></span>
+                                            </div>
+                                        )}
+                                        <div className="flex items-start gap-4">
+                                            <Link href={`/profile/${post.authorId}`}>
+                                                <Avatar>
+                                                    <AvatarImage src={post.authorAvatar} data-ai-hint="person portrait"/>
+                                                    <AvatarFallback>{post.authorName.charAt(0)}</AvatarFallback>
+                                                </Avatar>
+                                            </Link>
+                                            <div className="w-full">
+                                                <div className="flex items-center justify-between">
+                                                    <div>
+                                                        <Link href={`/profile/${post.authorId}`} className="font-semibold hover:underline">{post.authorName}</Link>
+                                                        <span className="text-sm text-muted-foreground ml-2">{post.authorHandle}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        {user && !isPostOwner && !post.isRepost && (
+                                                            <Button variant="outline" size="sm" onClick={() => handleFollow(post.authorId)}>
+                                                                <UserPlus className="h-4 w-4 mr-2" />
+                                                                {followingIds.includes(post.authorId) ? 'Following' : 'Follow'}
+                                                            </Button>
+                                                        )}
+                                                        {isPostOwner && !post.isRepost && (
+                                                              <DropdownMenu>
+                                                                <DropdownMenuTrigger asChild>
+                                                                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                                                                        <span className="sr-only">Open post menu</span>
+                                                                        <MoreHorizontal className="h-4 w-4" />
+                                                                    </Button>
+                                                                </DropdownMenuTrigger>
+                                                                <DropdownMenuContent align="end">
+                                                                    <Tooltip>
+                                                                        <TooltipTrigger asChild>
+                                                                            <div>
+                                                                                <DropdownMenuItem
+                                                                                    disabled={!isEditable}
+                                                                                    onSelect={() => {
+                                                                                        setPostToEdit(post);
+                                                                                        setEditedContent(post.content);
+                                                                                        setIsEditDialogOpen(true);
+                                                                                    }}
+                                                                                >
+                                                                                    <Edit className="mr-2 h-4 w-4" />
+                                                                                    <span>Edit</span>
+                                                                                </DropdownMenuItem>
+                                                                            </div>
+                                                                        </TooltipTrigger>
+                                                                        {!isEditable && (
+                                                                            <TooltipContent>
+                                                                                <p>Can only edit within 15 minutes of posting.</p>
+                                                                            </TooltipContent>
+                                                                        )}
+                                                                    </Tooltip>
+                                                                    <DropdownMenuSeparator />
+                                                                    <DropdownMenuItem onSelect={() => { setPostToDelete(post); setIsDeleteDialogOpen(true); }} className="text-red-600 focus:text-red-600">
+                                                                        <Trash2 className="mr-2 h-4 w-4" />
+                                                                        <span>Delete</span>
+                                                                    </DropdownMenuItem>
+                                                                </DropdownMenuContent>
+                                                            </DropdownMenu>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                                {user && user.uid !== post.authorId && (
-                                                    <Button variant="outline" size="sm" onClick={() => handleFollow(post.authorId)}>
-                                                        <UserPlus className="h-4 w-4 mr-2" />
-                                                        {followingIds.includes(post.authorId) ? 'Following' : 'Follow'}
+                                                
+                                                <p className="my-2 text-foreground/90">{post.content}</p>
+
+                                                {post.isRepost && post.originalPost && (
+                                                    <Card className="mt-4 border-2 border-border/80">
+                                                        <CardContent className="p-4">
+                                                             <div className="flex items-center gap-3">
+                                                                <Link href={`/profile/${post.originalPost.authorId}`}>
+                                                                    <Avatar className="h-8 w-8">
+                                                                        <AvatarImage src={post.originalPost.authorAvatar} />
+                                                                        <AvatarFallback>{post.originalPost.authorName.charAt(0)}</AvatarFallback>
+                                                                    </Avatar>
+                                                                </Link>
+                                                                <div>
+                                                                    <Link href={`/profile/${post.originalPost.authorId}`} className="font-semibold text-sm hover:underline">{post.originalPost.authorName}</Link>
+                                                                    <span className="text-xs text-muted-foreground ml-2">{post.originalPost.authorHandle}</span>
+                                                                </div>
+                                                            </div>
+                                                            <p className="mt-2 text-sm text-muted-foreground">{post.originalPost.content}</p>
+                                                        </CardContent>
+                                                    </Card>
+                                                )}
+
+                                                <div className="flex items-center justify-between text-muted-foreground pt-2">
+                                                    <Button variant="ghost" size="sm" className="flex items-center gap-2" onClick={() => handleCommentClick(post.id)}>
+                                                        <MessageCircle className="h-4 w-4" /> {post.comments}
                                                     </Button>
+                                                    <Button variant="ghost" size="sm" className="flex items-center gap-2" onClick={() => handleLikePost(post)}>
+                                                        <Heart fill={likedPosts.has(post.id) ? 'currentColor' : 'none'} className={`h-4 w-4 ${likedPosts.has(post.id) ? 'text-red-500' : ''}`} /> {post.likes}
+                                                    </Button>
+                                                    {!post.isRepost && (
+                                                        <Button variant="ghost" size="sm" className="flex items-center gap-2" onClick={() => { setPostToRepost(post); setIsRepostDialogOpen(true); }}>
+                                                            <Repeat className="h-4 w-4" /> Repost
+                                                        </Button>
+                                                    )}
+                                                    <Button variant="ghost" size="sm" className="flex items-center gap-2">
+                                                        <Share2 className="h-4 w-4" /> Share
+                                                    </Button>
+                                                </div>
+                                                {commentingOn === post.id && (
+                                                    <div className="mt-4 pt-4 border-t">
+                                                        <form onSubmit={(e) => { e.preventDefault(); handleCommentSubmit(post); }} className="flex w-full items-start gap-2">
+                                                            <Avatar className="h-9 w-9 mt-1">
+                                                                <AvatarImage src={user?.photoURL || ''} />
+                                                                <AvatarFallback>{user?.displayName?.charAt(0)}</AvatarFallback>
+                                                            </Avatar>
+                                                            <Textarea 
+                                                                placeholder="Write a comment..."
+                                                                value={commentContent}
+                                                                onChange={(e) => setCommentContent(e.target.value)}
+                                                                className="flex-1"
+                                                            />
+                                                            <Button type="submit" size="icon">
+                                                                <Send className="h-4 w-4" />
+                                                            </Button>
+                                                        </form>
+                                                        <ScrollArea className="mt-4 pr-4 max-h-64">
+                                                            <div className="space-y-4">
+                                                                {postComments.map(comment => (
+                                                                    <div key={comment.id} className="flex items-start gap-3">
+                                                                        <Link href={`/profile/${comment.authorId}`}>
+                                                                            <Avatar className="h-8 w-8">
+                                                                                <AvatarImage src={comment.authorAvatar} />
+                                                                                <AvatarFallback>{comment.authorName.charAt(0)}</AvatarFallback>
+                                                                            </Avatar>
+                                                                        </Link>
+                                                                        <div className="bg-muted rounded-lg p-3 text-sm flex-1">
+                                                                            <div className="flex items-center justify-between">
+                                                                                <Link href={`/profile/${comment.authorId}`} className="font-semibold text-xs hover:underline">{comment.authorName}</Link>
+                                                                                <span className="text-xs text-muted-foreground">{comment.createdAt ? formatDistanceToNow(comment.createdAt.toDate(), { addSuffix: true }) : ''}</span>
+                                                                            </div>
+                                                                            <p className="mt-1">{comment.text}</p>
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </ScrollArea>
+                                                    </div>
                                                 )}
                                             </div>
-                                            <p className="my-2 text-foreground/90">{post.content}</p>
-                                            <div className="flex items-center justify-between text-muted-foreground pt-2">
-                                                <Button variant="ghost" size="sm" className="flex items-center gap-2" onClick={() => handleCommentClick(post.id)}>
-                                                    <MessageCircle className="h-4 w-4" /> {post.comments}
-                                                </Button>
-                                                <Button variant="ghost" size="sm" className="flex items-center gap-2" onClick={() => handleLikePost(post)}>
-                                                    <Heart fill={likedPosts.has(post.id) ? 'currentColor' : 'none'} className={`h-4 w-4 ${likedPosts.has(post.id) ? 'text-red-500' : ''}`} /> {post.likes}
-                                                </Button>
-                                                <Button variant="ghost" size="sm" className="flex items-center gap-2">
-                                                    <Share2 className="h-4 w-4" /> Share
-                                                </Button>
-                                            </div>
-                                            {commentingOn === post.id && (
-                                                <div className="mt-4 pt-4 border-t">
-                                                    <form onSubmit={(e) => { e.preventDefault(); handleCommentSubmit(post); }} className="flex w-full items-start gap-2">
-                                                        <Avatar className="h-9 w-9 mt-1">
-                                                            <AvatarImage src={user?.photoURL || ''} />
-                                                            <AvatarFallback>{user?.displayName?.charAt(0)}</AvatarFallback>
-                                                        </Avatar>
-                                                        <Textarea 
-                                                            placeholder="Write a comment..."
-                                                            value={commentContent}
-                                                            onChange={(e) => setCommentContent(e.target.value)}
-                                                            className="flex-1"
-                                                        />
-                                                        <Button type="submit" size="icon">
-                                                            <Send className="h-4 w-4" />
-                                                        </Button>
-                                                    </form>
-                                                    <ScrollArea className="mt-4 pr-4 max-h-64">
-                                                        <div className="space-y-4">
-                                                            {postComments.map(comment => (
-                                                                <div key={comment.id} className="flex items-start gap-3">
-                                                                    <Link href={`/profile/${comment.authorId}`}>
-                                                                        <Avatar className="h-8 w-8">
-                                                                            <AvatarImage src={comment.authorAvatar} />
-                                                                            <AvatarFallback>{comment.authorName.charAt(0)}</AvatarFallback>
-                                                                        </Avatar>
-                                                                    </Link>
-                                                                    <div className="bg-muted rounded-lg p-3 text-sm flex-1">
-                                                                        <div className="flex items-center justify-between">
-                                                                            <Link href={`/profile/${comment.authorId}`} className="font-semibold text-xs hover:underline">{comment.authorName}</Link>
-                                                                            <span className="text-xs text-muted-foreground">{comment.createdAt ? formatDistanceToNow(comment.createdAt.toDate(), { addSuffix: true }) : ''}</span>
-                                                                        </div>
-                                                                        <p className="mt-1">{comment.text}</p>
-                                                                    </div>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    </ScrollArea>
-                                                </div>
-                                            )}
                                         </div>
+                                    </CardContent>
+                                </Card>
+                            )})}
+                        </div>
+                    </TabsContent>
+                    <TabsContent value="rooms" className="mt-6 space-y-6">
+                        <Dialog open={isRoomDialogOpen} onOpenChange={setIsRoomDialogOpen}>
+                            <DialogTrigger asChild>
+                                <Button className="w-full" disabled={!user}>
+                                    <PlusCircle className="mr-2 h-4 w-4" /> Create New Room
+                                </Button>
+                            </DialogTrigger>
+                            <DialogContent>
+                                <DialogHeader>
+                                    <DialogTitle>Create a New Audio Room</DialogTitle>
+                                    <DialogDescription>
+                                        Start a conversation! Give your room a title and description.
+                                    </DialogDescription>
+                                </DialogHeader>
+                                <form onSubmit={handleCreateRoom} className="space-y-4 py-4">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="room-title">Title</Label>
+                                        <Input id="room-title" value={roomTitle} onChange={(e) => setRoomTitle(e.target.value)} placeholder="e.g., Weekly Tech Roundup" />
                                     </div>
-                                </CardContent>
-                            </Card>
-                        ))}
-                    </div>
-                </TabsContent>
-                <TabsContent value="rooms" className="mt-6 space-y-6">
-                    <Dialog open={isRoomDialogOpen} onOpenChange={setIsRoomDialogOpen}>
-                        <DialogTrigger asChild>
-                            <Button className="w-full" disabled={!user}>
-                                <PlusCircle className="mr-2 h-4 w-4" /> Create New Room
-                            </Button>
-                        </DialogTrigger>
-                        <DialogContent>
-                            <DialogHeader>
-                                <DialogTitle>Create a New Audio Room</DialogTitle>
-                                <DialogDescription>
-                                    Start a conversation! Give your room a title and description.
-                                </DialogDescription>
-                            </DialogHeader>
-                            <form onSubmit={handleCreateRoom} className="space-y-4 py-4">
-                                <div className="space-y-2">
-                                    <Label htmlFor="room-title">Title</Label>
-                                    <Input id="room-title" value={roomTitle} onChange={(e) => setRoomTitle(e.target.value)} placeholder="e.g., Weekly Tech Roundup" />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="room-desc">Description</Label>
-                                    <Textarea id="room-desc" value={roomDescription} onChange={(e) => setRoomDescription(e.target.value)} placeholder="What will you be talking about?" />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Privacy</Label>
-                                    <RadioGroup defaultValue="true" value={isPublicRoom} onValueChange={setIsPublicRoom}>
-                                        <div className="flex items-center space-x-2">
-                                            <RadioGroupItem value="true" id="public" />
-                                            <Label htmlFor="public">Public</Label>
-                                        </div>
-                                        <div className="flex items-center space-x-2">
-                                            <RadioGroupItem value="false" id="private" />
-                                            <Label htmlFor="private">Private</Label>
-                                        </div>
-                                    </RadioGroup>
-                                </div>
-                                <DialogFooter>
-                                    <Button type="submit" disabled={!roomTitle.trim()}>Create Room</Button>
-                                </DialogFooter>
-                            </form>
-                        </DialogContent>
-                    </Dialog>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="room-desc">Description</Label>
+                                        <Textarea id="room-desc" value={roomDescription} onChange={(e) => setRoomDescription(e.target.value)} placeholder="What will you be talking about?" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Privacy</Label>
+                                        <RadioGroup defaultValue="true" value={isPublicRoom} onValueChange={setIsPublicRoom}>
+                                            <div className="flex items-center space-x-2">
+                                                <RadioGroupItem value="true" id="public" />
+                                                <Label htmlFor="public">Public</Label>
+                                            </div>
+                                            <div className="flex items-center space-x-2">
+                                                <RadioGroupItem value="false" id="private" />
+                                                <Label htmlFor="private">Private</Label>
+                                            </div>
+                                        </RadioGroup>
+                                    </div>
+                                    <DialogFooter>
+                                        <Button type="submit" disabled={!roomTitle.trim()}>Create Room</Button>
+                                    </DialogFooter>
+                                </form>
+                            </DialogContent>
+                        </Dialog>
 
-                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                         {rooms.map((room) => (
-                            <Card key={room.id}>
-                                <CardContent className="p-6 space-y-4">
-                                    <div className="flex items-center gap-4">
-                                        <div className="bg-primary/10 p-3 rounded-full">
-                                            <Mic className="h-6 w-6 text-primary"/>
-                                        </div>
-                                        <div>
-                                            <h4 className="font-semibold">{room.title}</h4>
-                                            <p className="text-sm text-muted-foreground">with {room.creatorName}</p>
-                                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                                <Users className="h-4 w-4" />
-                                                <span>{room.participantsCount} listening</span>
+                         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                             {rooms.map((room) => (
+                                <Card key={room.id}>
+                                    <CardContent className="p-6 space-y-4">
+                                        <div className="flex items-center gap-4">
+                                            <div className="bg-primary/10 p-3 rounded-full">
+                                                <Mic className="h-6 w-6 text-primary"/>
+                                            </div>
+                                            <div>
+                                                <h4 className="font-semibold">{room.title}</h4>
+                                                <p className="text-sm text-muted-foreground">with {room.creatorName}</p>
+                                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                                    <Users className="h-4 w-4" />
+                                                    <span>{room.participantsCount} listening</span>
+                                                </div>
                                             </div>
                                         </div>
+                                        <Link href={`/sound-sphere/${room.id}`} passHref>
+                                            <Button className="w-full" disabled={!user}>Join Room</Button>
+                                        </Link>
+                                    </CardContent>
+                                </Card>
+                             ))}
+                         </div>
+                    </TabsContent>
+                </Tabs>
+            </TooltipProvider>
+
+            {/* Dialog for Deleting Post */}
+            <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This action cannot be undone. This will permanently delete your post from our servers.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel onClick={() => setPostToDelete(null)}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleDeletePost} className="bg-destructive hover:bg-destructive/90">Delete</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            {/* Dialog for Editing Post */}
+            <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Edit Post</DialogTitle>
+                        <DialogDescription>
+                            Make changes to your post here. Click save when you're done.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={handleUpdatePost} className="space-y-4 py-4">
+                        <Textarea
+                            value={editedContent}
+                            onChange={(e) => setEditedContent(e.target.value)}
+                            rows={5}
+                        />
+                        <DialogFooter>
+                            <Button type="button" variant="ghost" onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
+                            <Button type="submit">Save Changes</Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
+
+             {/* Dialog for Reposting */}
+            <Dialog open={isRepostDialogOpen} onOpenChange={setIsRepostDialogOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Repost</DialogTitle>
+                        <DialogDescription>
+                            Add a comment to share this post on your profile.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={handleRepost} className="space-y-4 py-4">
+                        <Textarea
+                            placeholder="Add a comment... (optional)"
+                            value={repostComment}
+                            onChange={(e) => setRepostComment(e.target.value)}
+                            rows={3}
+                        />
+                        {postToRepost && (
+                            <Card className="bg-muted/50">
+                                <CardContent className="p-3">
+                                    <div className="flex items-center gap-2">
+                                        <Avatar className="h-6 w-6">
+                                            <AvatarImage src={postToRepost.authorAvatar} />
+                                            <AvatarFallback>{postToRepost.authorName.charAt(0)}</AvatarFallback>
+                                        </Avatar>
+                                        <span className="text-sm font-semibold">{postToRepost.authorName}</span>
+                                        <span className="text-xs text-muted-foreground">{postToRepost.authorHandle}</span>
                                     </div>
-                                    <Link href={`/sound-sphere/${room.id}`} passHref>
-                                        <Button className="w-full" disabled={!user}>Join Room</Button>
-                                    </Link>
+                                    <p className="text-sm text-muted-foreground mt-2">{postToRepost.content}</p>
                                 </CardContent>
                             </Card>
-                         ))}
-                     </div>
-                </TabsContent>
-            </Tabs>
+                        )}
+                        <DialogFooter>
+                            <Button type="button" variant="ghost" onClick={() => setIsRepostDialogOpen(false)}>Cancel</Button>
+                            <Button type="submit">Repost</Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
+
         </SubpageLayout>
     );
 }
+
+    
