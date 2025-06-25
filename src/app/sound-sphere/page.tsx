@@ -1,8 +1,9 @@
 
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { SubpageLayout } from "@/components/layout/subpage-layout";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -10,7 +11,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Mic, Users, MessageCircle, Heart, Share2, PlusCircle, UserPlus, Send, Newspaper, Radio, MoreHorizontal, Edit, Trash2, Repeat } from "lucide-react";
+import { Mic, Users, MessageCircle, Heart, Share2, PlusCircle, UserPlus, Send, Newspaper, Radio, MoreHorizontal, Edit, Trash2, Repeat, ImagePlus, X } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
@@ -19,9 +20,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useToast } from '@/hooks/use-toast';
-import { db, auth } from '@/lib/firebase';
+import { db, auth, storage } from '@/lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, addDoc, getDocs, serverTimestamp, query, orderBy, where, doc, setDoc, deleteDoc, getDoc, updateDoc, increment, Timestamp } from 'firebase/firestore';
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { formatDistanceToNow } from 'date-fns';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
@@ -34,6 +36,7 @@ interface OriginalPost {
     authorAvatar: string;
     content: string;
     createdAt: Timestamp;
+    imageUrls?: string[];
 }
 
 interface Post {
@@ -46,6 +49,7 @@ interface Post {
     likes: number;
     comments: number;
     createdAt: Timestamp;
+    imageUrls?: string[];
     isRepost?: boolean;
     originalPost?: OriginalPost;
 }
@@ -73,10 +77,13 @@ export default function SoundSpherePage() {
     const { toast } = useToast();
     const router = useRouter();
     const [user, setUser] = useState<User | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Feed State
     const [posts, setPosts] = useState<Post[]>([]);
     const [newPostContent, setNewPostContent] = useState('');
+    const [postImages, setPostImages] = useState<File[]>([]);
+    const [imagePreviews, setImagePreviews] = useState<string[]>([]);
     const [followingIds, setFollowingIds] = useState<string[]>([]);
     const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
     const [commentingOn, setCommentingOn] = useState<string | null>(null);
@@ -159,11 +166,55 @@ export default function SoundSpherePage() {
         const ids = querySnapshot.docs.map(doc => doc.id);
         setFollowingIds(ids);
     };
+    
+    const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(e.target.files || []);
+        if (files.length + postImages.length > 5) {
+            toast({ title: "Image Limit", description: "You can upload a maximum of 5 images.", variant: "destructive"});
+            return;
+        }
+        setPostImages(prev => [...prev, ...files]);
+
+        files.forEach(file => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setImagePreviews(prev => [...prev, reader.result as string]);
+            };
+            reader.readAsDataURL(file);
+        });
+        e.target.value = ''; // Reset file input
+    };
+
+    const handleRemoveImage = (indexToRemove: number) => {
+        setPostImages(prev => prev.filter((_, index) => index !== indexToRemove));
+        setImagePreviews(prev => prev.filter((_, index) => index !== indexToRemove));
+    };
 
     const handleCreatePost = async () => {
-        if (!db || !user || !newPostContent.trim()) {
-            toast({ title: "Error", description: "You must be logged in and write something to post.", variant: "destructive" });
+        if (!db || !user || !storage) {
+            toast({ title: "Error", description: "You must be logged in to post.", variant: "destructive" });
             return;
+        }
+        if (!newPostContent.trim() && postImages.length === 0) {
+            toast({ title: "Error", description: "You must write something or add an image to post.", variant: "destructive" });
+            return;
+        }
+
+        toast({ title: "Posting...", description: "Your post is being uploaded." });
+
+        let imageUrls: string[] = [];
+        if (postImages.length > 0) {
+            const uploadPromises = postImages.map(image => {
+                const imageRef = storageRef(storage, `posts/${user.uid}/${Date.now()}_${image.name}`);
+                return uploadBytes(imageRef, image).then(snapshot => getDownloadURL(snapshot.ref));
+            });
+            try {
+                imageUrls = await Promise.all(uploadPromises);
+            } catch (error) {
+                console.error("Error uploading images:", error);
+                toast({ title: "Image Upload Failed", description: "Could not upload your images.", variant: "destructive" });
+                return;
+            }
         }
 
         try {
@@ -173,12 +224,15 @@ export default function SoundSpherePage() {
                 authorHandle: `@${user.email?.split('@')[0] || user.uid.substring(0, 5)}`,
                 authorAvatar: user.photoURL || `https://placehold.co/40x40.png`,
                 content: newPostContent,
+                imageUrls: imageUrls,
                 likes: 0,
                 comments: 0,
                 createdAt: serverTimestamp(),
             });
             toast({ title: "Success", description: "Your post is live!" });
             setNewPostContent('');
+            setPostImages([]);
+            setImagePreviews([]);
             fetchPosts(user.uid);
         } catch (error) {
             console.error("Error creating post:", error);
@@ -400,6 +454,7 @@ export default function SoundSpherePage() {
                     authorHandle: postToRepost.authorHandle,
                     authorAvatar: postToRepost.authorAvatar,
                     content: postToRepost.content,
+                    imageUrls: postToRepost.imageUrls || [],
                     createdAt: postToRepost.createdAt
                 }
             });
@@ -437,7 +492,26 @@ export default function SoundSpherePage() {
                                     onChange={(e) => setNewPostContent(e.target.value)}
                                     disabled={!user}
                                 />
-                                <Button onClick={handleCreatePost} disabled={!user || !newPostContent.trim()}>Post to Sphere</Button>
+                                {imagePreviews.length > 0 && (
+                                    <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                                        {imagePreviews.map((src, index) => (
+                                            <div key={index} className="relative">
+                                                <Image src={src} alt={`Preview ${index + 1}`} width={100} height={100} className="w-full h-full rounded-md object-cover aspect-square" />
+                                                <Button variant="destructive" size="icon" className="absolute top-1 right-1 h-6 w-6 rounded-full" onClick={() => handleRemoveImage(index)}>
+                                                    <X className="h-4 w-4" />
+                                                </Button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                <input type="file" ref={fileInputRef} className="hidden" multiple accept="image/*" onChange={handleImageSelect} />
+                                <div className="flex items-center justify-between">
+                                    <Button variant="ghost" size="icon" onClick={() => fileInputRef.current?.click()} disabled={!user}>
+                                        <ImagePlus className="h-5 w-5" />
+                                        <span className="sr-only">Add images</span>
+                                    </Button>
+                                    <Button onClick={handleCreatePost} disabled={!user || (!newPostContent.trim() && postImages.length === 0)}>Post to Sphere</Button>
+                                </div>
                             </CardContent>
                         </Card>
 
@@ -517,7 +591,17 @@ export default function SoundSpherePage() {
                                                     </div>
                                                 </div>
                                                 
-                                                <p className="my-2 text-foreground/90">{post.content}</p>
+                                                <p className="my-2 text-foreground/90 whitespace-pre-wrap">{post.content}</p>
+
+                                                {post.imageUrls && post.imageUrls.length > 0 && (
+                                                    <div className={`mt-4 grid gap-1.5 ${post.imageUrls.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                                                        {post.imageUrls.map((url, index) => (
+                                                            <div key={index} className="relative aspect-video w-full overflow-hidden rounded-lg border">
+                                                                <Image src={url} alt={`Post image ${index+1}`} fill className="object-cover"/>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
 
                                                 {post.isRepost && post.originalPost && (
                                                     <Card className="mt-4 border-2 border-border/80">
@@ -535,6 +619,15 @@ export default function SoundSpherePage() {
                                                                 </div>
                                                             </div>
                                                             <p className="mt-2 text-sm text-muted-foreground">{post.originalPost.content}</p>
+                                                            {post.originalPost.imageUrls && post.originalPost.imageUrls.length > 0 && (
+                                                                <div className={`mt-2 grid gap-1 ${post.originalPost.imageUrls.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                                                                    {post.originalPost.imageUrls.map((url, index) => (
+                                                                        <div key={index} className="relative aspect-video w-full overflow-hidden rounded-md">
+                                                                            <Image src={url} alt={`Original post image ${index + 1}`} fill className="object-cover" />
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
                                                         </CardContent>
                                                     </Card>
                                                 )}
@@ -754,5 +847,3 @@ export default function SoundSpherePage() {
         </SubpageLayout>
     );
 }
-
-    
