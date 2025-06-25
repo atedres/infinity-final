@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, query, where, onSnapshot, orderBy, doc, addDoc, serverTimestamp, setDoc, getDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, doc, addDoc, serverTimestamp, setDoc, getDoc, updateDoc, increment, writeBatch } from 'firebase/firestore';
 import { db, auth } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetFooter } from '@/components/ui/sheet';
@@ -21,6 +21,7 @@ interface Chat {
     participants: string[];
     lastMessage: string;
     lastUpdate: any;
+    unreadCounts?: { [key: string]: number };
 }
 
 interface EnrichedChat extends Chat {
@@ -29,6 +30,7 @@ interface EnrichedChat extends Chat {
         name: string;
         avatar: string;
     };
+    unreadCount: number;
 }
 
 interface ChatMessage {
@@ -44,6 +46,7 @@ export function ChatLauncher() {
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [isOpen, setIsOpen] = useState(false);
     const [conversations, setConversations] = useState<EnrichedChat[]>([]);
+    const [totalUnread, setTotalUnread] = useState(0);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [newMessage, setNewMessage] = useState('');
     const [selectedChat, setSelectedChat] = useState<EnrichedChat | null>(null);
@@ -60,6 +63,7 @@ export function ChatLauncher() {
                 setMessages([]);
                 setSelectedChat(null);
                 setIsOpen(false);
+                setTotalUnread(0);
             }
         });
         return () => unsubscribe();
@@ -77,10 +81,13 @@ export function ChatLauncher() {
 
         const unsubscribe = onSnapshot(chatsQuery, async (snapshot) => {
             const chatsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Chat));
+            let unreadSum = 0;
             
             const enrichedChats = await Promise.all(chatsData.map(async (chat) => {
                 const otherId = chat.participants.find(p => p !== currentUser.uid) || '';
                 const otherName = chat.participantNames?.[otherId] || 'User';
+                const unreadCount = chat.unreadCounts?.[currentUser.uid] || 0;
+                unreadSum += unreadCount;
 
                 let otherAvatar = '';
                 if (otherId) {
@@ -92,11 +99,14 @@ export function ChatLauncher() {
 
                 return {
                     ...chat,
-                    otherParticipant: { id: otherId, name: otherName, avatar: otherAvatar }
+                    otherParticipant: { id: otherId, name: otherName, avatar: otherAvatar },
+                    unreadCount: unreadCount,
                 };
             }));
             
             setConversations(enrichedChats);
+            setTotalUnread(unreadSum);
+
         }, (error) => {
             console.error("Firestore chat listener error: ", error);
             if (error.code === 'failed-precondition') {
@@ -150,8 +160,7 @@ export function ChatLauncher() {
             const existingChat = conversations.find(c => c.otherParticipant.id === userId);
 
             if (existingChat) {
-                setSelectedChat(existingChat);
-                setIsOpen(true);
+                handleSelectChat(existingChat);
             } else {
                 // If it doesn't exist, we create a "virtual" chat object to select it.
                 // The real document will be created when the first message is sent.
@@ -173,14 +182,15 @@ export function ChatLauncher() {
                             id: userId,
                             name: `${otherUserData.firstName} ${otherUserData.lastName}`,
                             avatar: otherUserData.photoURL || ''
-                        }
+                        },
+                        unreadCount: 0,
                     };
-                    setSelectedChat(virtualChat);
-                    setIsOpen(true);
+                    handleSelectChat(virtualChat);
                 } else {
                     toast({ title: 'Error', description: 'Could not find user to chat with.', variant: 'destructive'});
                 }
             }
+            setIsOpen(true);
         };
 
         window.addEventListener('open-chat', handleOpenChat);
@@ -195,23 +205,63 @@ export function ChatLauncher() {
         e.preventDefault();
         if (!db || !currentUser || !selectedChat || !newMessage.trim()) return;
 
-        const messagesRef = collection(db, "chats", selectedChat.id, "messages");
-        await addDoc(messagesRef, {
-            text: newMessage,
-            senderId: currentUser.uid,
-            timestamp: serverTimestamp(),
-        });
-        
-        const chatDocRef = doc(db, "chats", selectedChat.id);
-        await setDoc(chatDocRef, {
-            participants: selectedChat.participants,
-            participantNames: selectedChat.participantNames,
-            lastMessage: newMessage,
-            lastUpdate: serverTimestamp(),
-        }, { merge: true });
+        const otherId = selectedChat.participants.find(p => p !== currentUser.uid);
+        if (!otherId) return;
 
-        setNewMessage('');
+        const chatDocRef = doc(db, "chats", selectedChat.id);
+        const messagesRef = collection(db, "chats", selectedChat.id, "messages");
+        
+        try {
+            await addDoc(messagesRef, {
+                text: newMessage,
+                senderId: currentUser.uid,
+                timestamp: serverTimestamp(),
+            });
+
+            const chatSnap = await getDoc(chatDocRef);
+            if (!chatSnap.exists()) {
+                 await setDoc(chatDocRef, {
+                    participants: selectedChat.participants,
+                    participantNames: selectedChat.participantNames,
+                    lastMessage: newMessage,
+                    lastUpdate: serverTimestamp(),
+                    unreadCounts: {
+                        [currentUser.uid]: 0,
+                        [otherId]: 1
+                    }
+                });
+            } else {
+                 await updateDoc(chatDocRef, {
+                    lastMessage: newMessage,
+                    lastUpdate: serverTimestamp(),
+                    [`unreadCounts.${otherId}`]: increment(1),
+                });
+            }
+
+            setNewMessage('');
+        } catch (error) {
+            console.error("Error sending message:", error);
+            toast({ title: "Error", description: "Could not send message.", variant: "destructive" });
+        }
     };
+
+    const handleSelectChat = async (chat: EnrichedChat) => {
+        if (!currentUser || !db) return;
+        
+        if (chat.unreadCount > 0) {
+            try {
+                const chatDocRef = doc(db, "chats", chat.id);
+                await updateDoc(chatDocRef, {
+                    [`unreadCounts.${currentUser.uid}`]: 0
+                });
+            } catch (error) {
+                // Non-critical error, can be ignored if doc doesn't exist yet
+                 console.warn("Could not mark chat as read, may not exist yet", error);
+            }
+        }
+        setSelectedChat(chat);
+    };
+
     
     // Reset view when closing the sheet
     useEffect(() => {
@@ -228,6 +278,11 @@ export function ChatLauncher() {
             <SheetTrigger asChild>
                 <Button variant="outline" size="icon" className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg z-50 bg-background hover:bg-accent">
                     <MessageSquare className="h-7 w-7 text-primary" />
+                    {totalUnread > 0 && (
+                        <span className="absolute -top-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-destructive text-xs font-bold text-destructive-foreground">
+                            {totalUnread > 9 ? '9+' : totalUnread}
+                        </span>
+                    )}
                 </Button>
             </SheetTrigger>
             <SheetContent className="flex flex-col p-0" side="right">
@@ -279,8 +334,11 @@ export function ChatLauncher() {
                             {conversations.length > 0 ? conversations.map(chat => (
                                 <button 
                                     key={chat.id} 
-                                    onClick={() => setSelectedChat(chat)}
-                                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-muted border-b"
+                                    onClick={() => handleSelectChat(chat)}
+                                    className={cn(
+                                        "w-full flex items-center gap-3 p-3 text-left hover:bg-muted border-b",
+                                        chat.unreadCount > 0 && "bg-blue-500/10 hover:bg-blue-500/20"
+                                    )}
                                 >
                                     <Avatar>
                                         <AvatarImage src={chat.otherParticipant.avatar} />
@@ -290,6 +348,11 @@ export function ChatLauncher() {
                                         <p className="font-semibold">{chat.otherParticipant.name}</p>
                                         <p className="text-sm text-muted-foreground truncate">{chat.lastMessage}</p>
                                     </div>
+                                    {chat.unreadCount > 0 && (
+                                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
+                                            {chat.unreadCount}
+                                        </span>
+                                    )}
                                 </button>
                             )) : (
                                 <div className="text-center text-muted-foreground p-8">
