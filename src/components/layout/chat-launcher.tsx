@@ -12,7 +12,7 @@ import { db, auth } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetFooter } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent as AlertDialogContentComponent, AlertDialogDescription as AlertDialogDescriptionComponent, AlertDialogFooter, AlertDialogHeader as AlertDialogHeaderComponent, AlertDialogTitle as AlertDialogTitleComponent } from "@/components/ui/alert-dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -66,6 +66,10 @@ const iceServers = [
     { urls: "stun:stun.ekiga.net" },
     { urls: "stun:stun.ideasip.com" },
     { urls: "stun:stun.voiparound.com" },
+    { urls: "stun:stun.voipraider.com" },
+    { urls: "stun:stun.voipstunt.com" },
+    { urls: "stun:stun.voxgratia.org" },
+    { urls: "stun:stun.xten.com" },
 ];
 
 const AudioPlayer = ({ stream }: { stream: MediaStream }) => {
@@ -129,17 +133,8 @@ export function ChatLauncher() {
             }
         });
 
-        const handleBeforeUnload = () => {
-            if (callStateRef.current !== 'idle') {
-                endCall(false);
-            }
-        };
-
-        window.addEventListener('beforeunload', handleBeforeUnload);
-
         return () => {
             unsubscribe();
-            window.removeEventListener('beforeunload', handleBeforeUnload);
         };
     }, []);
 
@@ -664,17 +659,17 @@ export function ChatLauncher() {
             {remoteStream && <AudioPlayer stream={remoteStream} />}
             <CallDialog />
              <AlertDialog open={callState === 'receiving'}>
-                <AlertDialogContentComponent>
-                    <AlertDialogHeaderComponent className="items-center">
+                <AlertDialogContent>
+                    <AlertDialogHeader className="items-center">
                          <Avatar className="h-20 w-20">
                             <AvatarImage src={incomingCall?.fromAvatar} alt={incomingCall?.fromName}/>
                             <AvatarFallback className="text-2xl">{incomingCall?.fromName?.[0]}</AvatarFallback>
                         </Avatar>
-                        <AlertDialogTitleComponent>{incomingCall?.fromName} is calling</AlertDialogTitleComponent>
-                        <AlertDialogDescriptionComponent>
+                        <AlertDialogTitle>{incomingCall?.fromName} is calling</AlertDialogTitle>
+                        <AlertDialogDescription>
                             Do you want to accept the call?
-                        </AlertDialogDescriptionComponent>
-                    </AlertDialogHeaderComponent>
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
                     <AlertDialogFooter className="justify-center">
                         <AlertDialogCancel asChild>
                             <Button variant="destructive" size="lg" className="rounded-full" onClick={declineCall}>Decline</Button>
@@ -683,7 +678,7 @@ export function ChatLauncher() {
                             <Button variant="default" size="lg" className="rounded-full bg-green-600 hover:bg-green-700" onClick={answerCall}>Accept</Button>
                         </AlertDialogAction>
                     </AlertDialogFooter>
-                </AlertDialogContentComponent>
+                </AlertDialogContent>
             </AlertDialog>
 
             <Sheet open={isOpen} onOpenChange={setIsOpen}>
