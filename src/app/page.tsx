@@ -11,6 +11,7 @@ import {
   Quote,
   LogOut,
   User as UserIcon,
+  Bell,
 } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -99,6 +100,14 @@ const stats = [
     { value: "500+", label: "Community Members" },
 ]
 
+// Mock data for notifications UI
+const mockNotifications = [
+    { id: 1, text: "John Smith started following you.", href: "#", time: "5 minutes ago" },
+    { id: 2, text: "Your post 'My first day with Next.js' received a new comment.", href: "#", time: "1 hour ago" },
+    { id: 3, text: "Jane Doe joined the 'Tech Startup Mixer' audio room.", href: "#", time: "3 hours ago" },
+];
+
+
 export default function Home() {
     const { toast } = useToast();
     const [user, setUser] = useState<User | null>(null);
@@ -109,6 +118,7 @@ export default function Home() {
     const [lastName, setLastName] = useState('');
     const [role, setRole] = useState('');
     const [isAuthDialogOpen, setIsAuthDialogOpen] = useState(false);
+    const [notifications, setNotifications] = useState(mockNotifications);
 
     useEffect(() => {
         if (!auth) return;
@@ -252,21 +262,62 @@ export default function Home() {
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-14 max-w-screen-2xl items-center">
-          <div className="mr-4 flex items-center">
-            <Link href="/" className="mr-6 flex items-center space-x-2">
-              <InfinityIcon className="h-6 w-6 text-primary" />
-              <span className="font-bold sm:inline-block">
-                Infinity Hub
-              </span>
-            </Link>
-          </div>
-          <div className="flex flex-1 items-center justify-end space-x-2">
-             <nav className="flex items-center space-x-2">
+            <div className="mr-6 flex items-center">
+                <Link href="/" className="mr-6 flex items-center space-x-2">
+                <InfinityIcon className="h-6 w-6 text-primary" />
+                <span className="font-bold sm:inline-block">
+                    Infinity Hub
+                </span>
+                </Link>
+                <nav className="hidden items-center space-x-6 text-sm font-medium md:flex">
+                    <Link href="/sound-sphere" className="text-foreground/60 transition-colors hover:text-foreground/80">
+                        Sound Sphere
+                    </Link>
+                    <Link href="/join-project" className="text-foreground/60 transition-colors hover:text-foreground/80">
+                        Join Project
+                    </Link>
+                </nav>
+            </div>
+            <div className="flex flex-1 items-center justify-end space-x-4">
                 <Button variant="outline" asChild>
                     <Link href="/admin-dashboard">Admin</Link>
                 </Button>
                 {user ? (
-                   <DropdownMenu>
+                <div className="flex items-center space-x-2">
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="relative h-8 w-8 rounded-full">
+                                <Bell className="h-5 w-5" />
+                                {notifications.length > 0 && (
+                                    <span className="absolute top-0 right-0 flex h-2 w-2">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+                                    </span>
+                                )}
+                                <span className="sr-only">View notifications</span>
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-80">
+                            <DropdownMenuLabel>Notifications</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            {notifications.length > 0 ? (
+                                notifications.map(notification => (
+                                    <DropdownMenuItem key={notification.id} asChild className="cursor-pointer">
+                                        <Link href={notification.href} className="flex flex-col items-start gap-1 w-full">
+                                            <p className="text-sm leading-tight whitespace-normal">{notification.text}</p>
+                                            <p className="text-xs text-muted-foreground">{notification.time}</p>
+                                        </Link>
+                                    </DropdownMenuItem>
+                                ))
+                            ) : (
+                                <DropdownMenuItem disabled>
+                                    <p className="text-sm text-center w-full">No new notifications</p>
+                                </DropdownMenuItem>
+                            )}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+
+                    <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                             <Button variant="ghost" className="relative h-8 w-8 rounded-full">
                                 <Avatar className="h-8 w-8">
@@ -296,18 +347,18 @@ export default function Home() {
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
+                </div>
                 ) : (
-                    <>
+                    <div className="flex items-center space-x-2">
                         <Button variant="ghost" onClick={() => handleAuthDialogOpen('login')}>
                             Login
                         </Button>
                         <Button onClick={() => handleAuthDialogOpen('signup')}>
                             Sign Up
                         </Button>
-                    </>
+                    </div>
                 )}
-            </nav>
-          </div>
+            </div>
         </div>
       </header>
       <main className="flex-1">
@@ -498,4 +549,5 @@ export default function Home() {
       </footer>
     </div>
   );
-}
+
+    
