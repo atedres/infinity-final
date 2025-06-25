@@ -4,7 +4,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { SubpageLayout } from "@/components/layout/subpage-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -88,6 +88,8 @@ export default function SoundSpherePage() {
     const router = useRouter();
     const pathname = usePathname();
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const searchParams = useSearchParams();
+    const defaultTab = searchParams.get('tab') || 'feed';
 
     // Feed State
     const [posts, setPosts] = useState<Post[]>([]);
@@ -711,7 +713,7 @@ export default function SoundSpherePage() {
             </div>
 
             <TooltipProvider>
-                <Tabs defaultValue="feed" className="w-full">
+                <Tabs defaultValue={defaultTab} className="w-full">
                     <TabsList className="grid w-full grid-cols-2">
                         <TabsTrigger value="feed"><Newspaper className="mr-2 h-4 w-4" />Post Feed</TabsTrigger>
                         <TabsTrigger value="rooms"><Radio className="mr-2 h-4 w-4" />Audio Rooms</TabsTrigger>

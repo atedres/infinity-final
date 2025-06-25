@@ -160,10 +160,8 @@ export default function AudioRoomPage() {
                     const remainingParticipantsSnap = await getDocs(collection(roomRef, "participants"));
                     if (remainingParticipantsSnap.size > 0) {
                         await updateDoc(roomRef, { participantsCount: remainingParticipantsSnap.size });
-                    } else {
-                         // If I was the last one, delete the room
-                        await deleteDoc(roomRef);
                     }
+                    // Do not delete the room if I am the last one, let the creator do that explicitly
                 }
             } catch (error) {
                  if (error instanceof Error && (error as any).code !== 'not-found') {
@@ -198,16 +196,6 @@ export default function AudioRoomPage() {
                 const roomData = { id: docSnap.id, ...docSnap.data() } as Room
                 setRoom(roomData);
                 setPinnedLink(roomData.pinnedLink || null);
-
-                // This part is inside the listener to react to changes
-                const myParticipantData = participants.find(p => p.id === myId);
-                const myRole = myParticipantData?.role;
-                if(myRole === 'creator' || myRole === 'speaker') {
-                    if (localStreamRef.current && localStreamRef.current.getAudioTracks().every(t => !t.enabled)) {
-                        localStreamRef.current.getAudioTracks().forEach(track => track.enabled = true);
-                        setIsMuted(false);
-                    }
-                }
 
             }, (error) => {
                 console.error("Error listening to room document:", error);
@@ -576,7 +564,7 @@ export default function AudioRoomPage() {
 
 
     if (isLoading || !room || !currentUser) {
-        return <SubpageLayout title="Sound Sphere Room" backHref="/sound-sphere"><div className="text-center">Loading room...</div></SubpageLayout>;
+        return <SubpageLayout title="Sound Sphere Room" backHref="/sound-sphere?tab=rooms"><div className="text-center">Loading room...</div></SubpageLayout>;
     }
 
     const isCreator = currentUser?.uid === room.creatorId;
@@ -613,7 +601,7 @@ export default function AudioRoomPage() {
     );
 
     return (
-        <SubpageLayout title={room.title} backHref="/sound-sphere" showTitle={false}>
+        <SubpageLayout title={room.title} backHref="/sound-sphere?tab=rooms" showTitle={false}>
             {remoteStreams.map(remote => <AudioPlayer key={remote.peerId} stream={remote.stream} />)}
             <div className="mx-auto max-w-4xl space-y-8">
                  <div className="text-left">
