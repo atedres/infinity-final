@@ -7,11 +7,12 @@ import { SubpageLayout } from "@/components/layout/subpage-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from '@/hooks/use-toast';
 import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, collection, onSnapshot, setDoc, deleteDoc, updateDoc, getDocs, query, where, addDoc } from 'firebase/firestore';
-import { Mic, MicOff, LogOut, XCircle, Hand, Check, X, Users, Headphones } from 'lucide-react';
+import { doc, getDoc, collection, onSnapshot, setDoc, deleteDoc, updateDoc, getDocs, query, where, addDoc, serverTimestamp } from 'firebase/firestore';
+import { Mic, MicOff, LogOut, XCircle, Hand, Check, X, Users, Headphones, UserPlus, UserCheck, MessageSquare, UserX } from 'lucide-react';
 import Peer from 'simple-peer';
 import type { Instance as PeerInstance } from 'simple-peer';
 import 'webrtc-adapter';
@@ -79,10 +80,16 @@ export default function AudioRoomPage() {
     const peersRef = useRef<Record<string, PeerInstance>>({});
     const [remoteStreams, setRemoteStreams] = useState<RemoteStream[]>([]);
 
+    // Profile Dialog State
+    const [selectedUser, setSelectedUser] = useState<Participant | null>(null);
+    const [followingIds, setFollowingIds] = useState<string[]>([]);
+    const [blockedIds, setBlockedIds] = useState<string[]>([]);
+
     useEffect(() => {
-        const unsubscribeAuth = onAuthStateChanged(auth, user => {
+        const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
             if (user) {
                 setCurrentUser(user);
+                await fetchUserRelations(user.uid);
             } else {
                 toast({ title: "Authentication Required", description: "You must be logged in to enter a room.", variant: "destructive" });
                 router.push('/sound-sphere');
@@ -91,6 +98,20 @@ export default function AudioRoomPage() {
         return () => unsubscribeAuth();
     }, [router, toast]);
     
+     const fetchUserRelations = async (userId: string) => {
+        if (!db) return;
+        const followingQuery = collection(db, "users", userId, "following");
+        const blockedQuery = collection(db, "users", userId, "blocked");
+
+        const [followingSnapshot, blockedSnapshot] = await Promise.all([
+            getDocs(followingQuery),
+            getDocs(blockedQuery)
+        ]);
+
+        setFollowingIds(followingSnapshot.docs.map(doc => doc.id));
+        setBlockedIds(blockedSnapshot.docs.map(doc => doc.id));
+    };
+
     // Main setup effect
     useEffect(() => {
         if (!currentUser || !roomId || !db) return;
@@ -202,7 +223,12 @@ export default function AudioRoomPage() {
             // 3. Set up participant listener
             const participantsColRef = collection(db, "audioRooms", roomId, "participants");
             unsubParticipants = onSnapshot(participantsColRef, snapshot => {
-                const latestParticipants = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Participant));
+                let latestParticipants = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Participant));
+                
+                // Filter out blocked users
+                if (blockedIds.length > 0) {
+                    latestParticipants = latestParticipants.filter(p => !blockedIds.includes(p.id));
+                }
                 setParticipants(latestParticipants);
 
                 const myData = latestParticipants.find(p => p.id === myId);
@@ -356,6 +382,64 @@ export default function AudioRoomPage() {
         await deleteDoc(requestRef);
     };
 
+    const handleFollowToggle = async () => {
+        if (!db || !currentUser || !selectedUser) return;
+        
+        const followingRef = doc(db, "users", currentUser.uid, "following", selectedUser.id);
+        const followerRef = doc(db, "users", selectedUser.id, "followers", currentUser.uid);
+
+        try {
+            if (followingIds.includes(selectedUser.id)) {
+                await deleteDoc(followingRef);
+                await deleteDoc(followerRef);
+                setFollowingIds(prev => prev.filter(id => id !== selectedUser.id));
+                toast({ title: "Unfollowed" });
+            } else {
+                await setDoc(followingRef, { since: serverTimestamp() });
+                await setDoc(followerRef, { by: currentUser.displayName || 'Anonymous', at: serverTimestamp() });
+                setFollowingIds(prev => [...prev, selectedUser.id]);
+                toast({ title: "Followed" });
+                 if (currentUser.uid !== selectedUser.id) {
+                    await addDoc(collection(db, "notifications"), {
+                        recipientId: selectedUser.id,
+                        actorId: currentUser.uid,
+                        actorName: currentUser.displayName || 'Someone',
+                        type: 'follow',
+                        entityId: currentUser.uid,
+                        read: false,
+                        createdAt: serverTimestamp(),
+                    });
+                }
+            }
+        } catch (error) {
+            console.error("Error following user:", error);
+            toast({ title: "Error", description: "Could not perform action.", variant: "destructive" });
+        }
+    };
+
+    const handleMessageClick = () => {
+        if (!selectedUser) return;
+        router.push(`/profile/${selectedUser.id}`);
+        setSelectedUser(null);
+    };
+    
+    const handleBlockUser = async () => {
+        if (!db || !currentUser || !selectedUser) return;
+        
+        const blockRef = doc(db, "users", currentUser.uid, "blocked", selectedUser.id);
+        try {
+            await setDoc(blockRef, { blockedAt: serverTimestamp() });
+            toast({ title: "User Blocked", description: `${selectedUser.name} has been blocked.` });
+            setBlockedIds(prev => [...prev, selectedUser.id]);
+            setParticipants(prev => prev.filter(p => p.id !== selectedUser.id));
+            setSelectedUser(null); // Close dialog
+        } catch (error) {
+            console.error("Error blocking user:", error);
+            toast({ title: "Error", description: "Could not block user.", variant: "destructive" });
+        }
+    };
+
+
     if (isLoading || !room || !currentUser) {
         return <SubpageLayout title="Sound Sphere Room"><div className="text-center">Loading room...</div></SubpageLayout>;
     }
@@ -363,11 +447,28 @@ export default function AudioRoomPage() {
     const isCreator = currentUser?.uid === room.creatorId;
     const myParticipantData = participants.find(p => p.id === currentUser.uid);
     const myRole = myParticipantData?.role;
-
     const canSpeak = myRole === 'creator' || myRole === 'speaker';
+    const isFollowingSelected = selectedUser && followingIds.includes(selectedUser.id);
     
     const speakers = participants.filter(p => p.role === 'creator' || p.role === 'speaker');
     const listeners = participants.filter(p => p.role === 'listener');
+    
+    const renderParticipant = (p: Participant) => (
+         <DialogTrigger asChild key={p.id} disabled={p.id === currentUser.uid} onSelect={() => setSelectedUser(p)}>
+            <div className="relative flex flex-col items-center gap-2 cursor-pointer transition-transform hover:scale-105">
+                 <Avatar className={`h-20 w-20 border-4 ${(p.role === 'creator' || p.role === 'speaker') && !p.isMuted ? 'border-green-500 animate-pulse' : 'border-transparent'}`}>
+                    <AvatarImage src={p.avatar} data-ai-hint="person portrait"/>
+                    <AvatarFallback>{p.name?.[0]}</AvatarFallback>
+                </Avatar>
+                {(p.isMuted || p.role === 'listener') && (
+                    <div className="absolute top-1 right-1 bg-slate-700 rounded-full p-1 border-2 border-background">
+                        <MicOff className="h-3 w-3 text-slate-100" />
+                    </div>
+                )}
+                <p className="font-medium text-sm truncate w-full">{p.name}</p>
+            </div>
+        </DialogTrigger>
+    );
 
     return (
         <SubpageLayout title={room.title}>
@@ -404,52 +505,54 @@ export default function AudioRoomPage() {
                         </CardContent>
                     </Card>
                 )}
+                <Dialog open={!!selectedUser} onOpenChange={(isOpen) => !isOpen && setSelectedUser(null)}>
+                    <Card>
+                        <CardHeader className="flex flex-row items-center gap-2">
+                            <Mic className="h-5 w-5 text-primary" />
+                            <CardTitle>Speakers ({speakers.length})</CardTitle>
+                        </CardHeader>
+                        <CardContent className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-6">
+                            {speakers.map(renderParticipant)}
+                             {speakers.length === 0 && <p className="text-muted-foreground col-span-full text-center">No speakers yet.</p>}
+                        </CardContent>
+                    </Card>
 
-                <Card>
-                    <CardHeader className="flex flex-row items-center gap-2">
-                        <Mic className="h-5 w-5 text-primary" />
-                        <CardTitle>Speakers ({speakers.length})</CardTitle>
-                    </CardHeader>
-                    <CardContent className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-6">
-                        {speakers.map(p => (
-                            <div key={p.id} className="relative flex flex-col items-center gap-2">
-                                 <Avatar className={`h-20 w-20 border-4 ${!p.isMuted ? 'border-green-500 animate-pulse' : 'border-transparent'}`}>
-                                    <AvatarImage src={p.avatar} data-ai-hint="person portrait"/>
-                                    <AvatarFallback>{p.name?.[0]}</AvatarFallback>
-                                </Avatar>
-                                {p.isMuted && (
-                                    <div className="absolute top-1 right-1 bg-slate-700 rounded-full p-1 border-2 border-background">
-                                        <MicOff className="h-3 w-3 text-slate-100" />
-                                    </div>
-                                )}
-                                <p className="font-medium text-sm truncate w-full">{p.name}</p>
-                            </div>
-                        ))}
-                         {speakers.length === 0 && <p className="text-muted-foreground col-span-full text-center">No speakers yet.</p>}
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader className="flex flex-row items-center gap-2">
-                        <Headphones className="h-5 w-5 text-muted-foreground" />
-                        <CardTitle>Listeners ({listeners.length})</CardTitle>
-                    </CardHeader>
-                    <CardContent className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-6">
-                        {listeners.map(p => (
-                            <div key={p.id} className="relative flex flex-col items-center gap-2">
-                                 <Avatar className="h-20 w-20">
-                                    <AvatarImage src={p.avatar} data-ai-hint="person portrait"/>
-                                    <AvatarFallback>{p.name?.[0]}</AvatarFallback>
-                                </Avatar>
-                                 <div className="absolute top-1 right-1 bg-slate-700 rounded-full p-1 border-2 border-background">
-                                    <MicOff className="h-3 w-3 text-slate-100" />
+                    <Card>
+                        <CardHeader className="flex flex-row items-center gap-2">
+                            <Headphones className="h-5 w-5 text-muted-foreground" />
+                            <CardTitle>Listeners ({listeners.length})</CardTitle>
+                        </CardHeader>
+                        <CardContent className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-6">
+                           {listeners.map(renderParticipant)}
+                            {listeners.length === 0 && <p className="text-muted-foreground col-span-full text-center">No listeners yet.</p>}
+                        </CardContent>
+                    </Card>
+                     <DialogContent>
+                        {selectedUser && (
+                            <>
+                                <DialogHeader className="items-center text-center pt-4">
+                                     <Avatar className="h-24 w-24 border-2 border-primary">
+                                        <AvatarImage src={selectedUser.avatar} alt={selectedUser.name} />
+                                        <AvatarFallback className="text-3xl">{selectedUser.name?.[0]}</AvatarFallback>
+                                    </Avatar>
+                                    <DialogTitle className="text-2xl pt-2">{selectedUser.name}</DialogTitle>
+                                </DialogHeader>
+                                <div className="flex justify-center gap-2 pt-4">
+                                    <Button onClick={handleFollowToggle}>
+                                        {isFollowingSelected ? <UserCheck className="mr-2 h-4 w-4" /> : <UserPlus className="mr-2 h-4 w-4" />}
+                                        {isFollowingSelected ? 'Following' : 'Follow'}
+                                    </Button>
+                                    <Button variant="outline" onClick={handleMessageClick}>
+                                        <MessageSquare className="mr-2 h-4 w-4" /> Message
+                                    </Button>
+                                    <Button variant="destructive" onClick={handleBlockUser}>
+                                        <UserX className="mr-2 h-4 w-4" /> Block
+                                    </Button>
                                 </div>
-                                <p className="font-medium text-sm truncate w-full">{p.name}</p>
-                            </div>
-                        ))}
-                        {listeners.length === 0 && <p className="text-muted-foreground col-span-full text-center">No listeners yet.</p>}
-                    </CardContent>
-                </Card>
+                            </>
+                        )}
+                    </DialogContent>
+                </Dialog>
 
                 <div className="flex justify-center gap-4">
                      {canSpeak ? (
