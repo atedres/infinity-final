@@ -87,7 +87,6 @@ export default function SoundSpherePage() {
     const { toast } = useToast();
     const router = useRouter();
     const pathname = usePathname();
-    const [user, setUser] = useState<User | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Feed State
@@ -132,6 +131,7 @@ export default function SoundSpherePage() {
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<ProfileUser[]>([]);
     const [isSearching, setIsSearching] = useState(false);
+    const [user, setUser] = useState<User | null>(null);
 
 
     useEffect(() => {
@@ -375,6 +375,7 @@ export default function SoundSpherePage() {
                 description: roomDescription,
                 isPublic: isPublicRoom === "true",
                 participantsCount: 0,
+                roles: {},
                 createdAt: serverTimestamp(),
             });
             toast({ title: "Success", description: "Your room has been created." });

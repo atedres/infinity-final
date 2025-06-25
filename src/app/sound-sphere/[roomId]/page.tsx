@@ -26,6 +26,7 @@ interface Room {
     description: string;
     creatorId: string;
     pinnedLink?: string;
+    roles?: { [key: string]: 'speaker' };
 }
 
 interface Participant {
@@ -222,17 +223,20 @@ export default function AudioRoomPage() {
 
             const roomData = initialRoomSnap.data() as Room;
             const isCreator = roomData.creatorId === myId;
-            const myRole = isCreator ? 'creator' : 'listener';
+            const persistedRoles = roomData.roles || {};
+            const isPersistedSpeaker = persistedRoles[myId] === 'speaker';
+
+            const myRole = isCreator ? 'creator' : isPersistedSpeaker ? 'speaker' : 'listener';
 
             const participantRef = doc(db, "audioRooms", roomId, "participants", myId);
             await setDoc(participantRef, {
                 name: myName,
                 avatar: currentUser.photoURL || `https://placehold.co/96x96.png`,
-                isMuted: myRole === 'listener', // Mute unless creator
+                isMuted: myRole === 'listener',
                 role: myRole,
             });
             
-            if (isCreator && localStreamRef.current) {
+            if (myRole !== 'listener' && localStreamRef.current) {
                 localStreamRef.current.getAudioTracks().forEach(track => track.enabled = true);
                 setIsMuted(false);
             }
@@ -467,7 +471,13 @@ export default function AudioRoomPage() {
         const requestRef = doc(db, "audioRooms", roomId, "requests", requesterId);
         if (accept) {
             const participantRef = doc(db, "audioRooms", roomId, "participants", requesterId);
+            const roomRef = doc(db, "audioRooms", roomId);
             try {
+                // Persist the speaker role in the main room document
+                await updateDoc(roomRef, {
+                    [`roles.${requesterId}`]: 'speaker'
+                });
+                // Update the current participant document for immediate effect
                 await updateDoc(participantRef, { role: 'speaker', isMuted: false });
             } catch(e) {
                 console.warn("Participant may have left before being accepted.");
@@ -606,7 +616,7 @@ export default function AudioRoomPage() {
         <SubpageLayout title={room.title} backHref="/sound-sphere" showTitle={false}>
             {remoteStreams.map(remote => <AudioPlayer key={remote.peerId} stream={remote.stream} />)}
             <div className="mx-auto max-w-4xl space-y-8">
-                 <div>
+                 <div className="text-left">
                     <h1 className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl font-headline">{room.title}</h1>
                     <p className="mt-2 text-lg text-muted-foreground">{room.description}</p>
                 </div>
