@@ -699,5 +699,3 @@ export default function ProfilePage() {
         </SubpageLayout>
     );
 }
-
-    
