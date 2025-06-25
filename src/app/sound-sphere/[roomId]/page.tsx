@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { SubpageLayout } from "@/components/layout/subpage-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -67,7 +67,7 @@ const iceServers = [
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
-    { urls: 'stun:stun.services.mozilla.com' },
+    { urls: "stun:stun.services.mozilla.com" },
     { urls: "stun:stun.ekiga.net" },
     { urls: "stun:stun.ideasip.com" },
     { urls: "stun:stun.voiparound.com" },
@@ -177,7 +177,7 @@ export default function AudioRoomPage() {
 
             unsubParticipants();
             unsubSignals();
-unsubRoom();
+            unsubRoom();
             unsubRequests();
             
             if (!db) return;
@@ -185,9 +185,11 @@ unsubRoom();
             const roomRef = doc(db, "audioRooms", roomId);
 
             try {
-                await deleteDoc(participantRef);
                 const roomSnap = await getDoc(roomRef);
+                // Only perform deletions if the room still exists
                 if (roomSnap.exists()) {
+                    await deleteDoc(participantRef);
+
                     const participantsCollectionRef = collection(roomRef, "participants");
                     const remainingParticipantsSnap = await getDocs(participantsCollectionRef);
                     if (remainingParticipantsSnap.size === 0) {
@@ -304,8 +306,9 @@ unsubRoom();
                     }
                 }
 
-                if (!localStreamRef.current) {
-                    console.warn("[Peer Logic] Skipping peer connection logic: local stream not available.");
+                // Wait until local stream is confirmed to be ready.
+                if (!localStreamRef.current || localStreamRef.current.getAudioTracks().length === 0) {
+                    console.warn("[Peer Logic] Skipping peer connection logic: local stream not available or ready.");
                     return;
                 }
 
@@ -639,7 +642,7 @@ unsubRoom();
         }
     };
     
-    const handleEnterPip = async () => {
+    const handleEnterPip = useCallback(async () => {
         const video = pipVideoRef.current;
         if (!video) {
             toast({ title: "Error", description: "PiP video element not ready.", variant: "destructive" });
@@ -656,10 +659,25 @@ unsubRoom();
                 }
             } catch (error) {
                 console.error("Error entering PiP:", error);
-                toast({ title: "PiP Error", description: "Could not enter Picture-in-Picture mode.", variant: "destructive" });
+                toast({ title: "PiP Error", description: "Could not enter Picture-in-Picture mode. This may require a direct user click.", variant: "destructive" });
             }
         }
-    };
+    }, [toast]);
+
+    // Automatically enter PiP when tab is hidden
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'hidden' && !document.pictureInPictureElement && pipVideoRef.current) {
+                handleEnterPip();
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, [handleEnterPip]);
 
 
     if (isLoading || !room || !currentUser) {
