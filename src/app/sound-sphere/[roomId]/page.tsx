@@ -7,12 +7,14 @@ import { SubpageLayout } from "@/components/layout/subpage-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { useToast } from '@/hooks/use-toast';
 import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDoc, collection, onSnapshot, setDoc, deleteDoc, updateDoc, getDocs, query, where, addDoc, serverTimestamp } from 'firebase/firestore';
-import { Mic, MicOff, LogOut, XCircle, Hand, Check, X, Users, Headphones, UserPlus, UserCheck, MessageSquare, UserX } from 'lucide-react';
+import { Mic, MicOff, LogOut, XCircle, Hand, Check, X, Users, Headphones, UserPlus, UserCheck, MessageSquare, UserX, Link as LinkIcon, MoreVertical } from 'lucide-react';
 import Peer from 'simple-peer';
 import type { Instance as PeerInstance } from 'simple-peer';
 import 'webrtc-adapter';
@@ -23,6 +25,7 @@ interface Room {
     title: string;
     description: string;
     creatorId: string;
+    pinnedLink?: string;
 }
 
 interface Participant {
@@ -86,6 +89,11 @@ export default function AudioRoomPage() {
     const [blockedIds, setBlockedIds] = useState<string[]>([]);
     const [profileStats, setProfileStats] = useState<{posts: number, followers: number, following: number} | null>(null);
     const [isStatsLoading, setIsStatsLoading] = useState(false);
+    
+    // Pinned Link State
+    const [pinnedLink, setPinnedLink] = useState<string | null>(null);
+    const [isPinLinkDialogOpen, setIsPinLinkDialogOpen] = useState(false);
+    const [linkToPin, setLinkToPin] = useState('');
 
     useEffect(() => {
         const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
@@ -139,33 +147,25 @@ export default function AudioRoomPage() {
             unsubSignals();
             unsubRoom();
             unsubRequests();
-
-            const roomRef = doc(db, "audioRooms", roomId);
-
-            try {
-                const currentRoomDoc = await getDoc(roomRef);
-                if (currentRoomDoc.exists()) {
-                    const participantRef = doc(db, "audioRooms", roomId, "participants", myId);
-                    const participantSnap = await getDoc(participantRef);
-
-                    if (participantSnap.exists()) {
-                        if (currentRoomDoc.data().creatorId === myId) {
-                            console.log(`[CLEANUP] Creator is ending the room.`);
-                             // Deleting the room doc will trigger other users to leave
-                            await deleteDoc(roomRef);
-                        } else {
-                            await deleteDoc(participantRef);
-                             const remainingParticipantsSnap = await getDocs(collection(roomRef, "participants"));
-                            if (remainingParticipantsSnap.size === 0) {
-                                await deleteDoc(roomRef);
-                            } else {
-                                await updateDoc(roomRef, { participantsCount: remainingParticipantsSnap.size });
-                            }
-                        }
+            
+            if (!db) return;
+            
+            const participantRef = doc(db, "audioRooms", roomId, "participants", myId);
+             try {
+                const participantSnap = await getDoc(participantRef);
+                if (participantSnap.exists()) {
+                    await deleteDoc(participantRef);
+                    const roomRef = doc(db, "audioRooms", roomId);
+                    const remainingParticipantsSnap = await getDocs(collection(roomRef, "participants"));
+                    if (remainingParticipantsSnap.size > 0) {
+                        await updateDoc(roomRef, { participantsCount: remainingParticipantsSnap.size });
+                    } else {
+                         // If I was the last one, delete the room
+                        await deleteDoc(roomRef);
                     }
                 }
             } catch (error) {
-                console.error("[CLEANUP] Error during firestore cleanup: ", error);
+                 console.error("[CLEANUP] Error during firestore cleanup: ", error);
             }
         };
 
@@ -185,22 +185,40 @@ export default function AudioRoomPage() {
 
             // 2. Get room info and join
             const roomDocRef = doc(db, "audioRooms", roomId);
-            const roomSnap = await getDoc(roomDocRef);
-            if (!roomSnap.exists()) {
+
+            unsubRoom = onSnapshot(roomDocRef, (docSnap) => {
+                if(!docSnap.exists()){
+                     toast({ title: "Room Ended", description: "The creator has closed the room." });
+                     router.push('/sound-sphere');
+                     return;
+                }
+                const roomData = { id: docSnap.id, ...docSnap.data() } as Room
+                setRoom(roomData);
+                setPinnedLink(roomData.pinnedLink || null);
+
+                // This part is inside the listener to react to changes
+                const myParticipantData = participants.find(p => p.id === myId);
+                const myRole = myParticipantData?.role;
+                if(myRole === 'creator' || myRole === 'speaker') {
+                    if (localStreamRef.current && localStreamRef.current.getAudioTracks().every(t => !t.enabled)) {
+                        localStreamRef.current.getAudioTracks().forEach(track => track.enabled = true);
+                        setIsMuted(false);
+                    }
+                }
+
+            }, (error) => {
+                console.error("Error listening to room document:", error);
+                router.push('/sound-sphere');
+            });
+            
+            const initialRoomSnap = await getDoc(roomDocRef);
+             if (!initialRoomSnap.exists()) {
                 toast({ title: "Room not found", variant: "destructive" });
                 router.push('/sound-sphere');
                 return;
             }
-            const roomData = { id: roomSnap.id, ...roomSnap.data() } as Room
-            setRoom(roomData);
 
-            unsubRoom = onSnapshot(roomDocRef, (doc) => {
-                if(!doc.exists()){
-                     toast({ title: "Room Ended", description: "The creator has closed the room." });
-                     router.push('/sound-sphere');
-                }
-            });
-
+            const roomData = initialRoomSnap.data() as Room;
             const isCreator = roomData.creatorId === myId;
             const myRole = isCreator ? 'creator' : 'listener';
 
@@ -208,7 +226,7 @@ export default function AudioRoomPage() {
             await setDoc(participantRef, {
                 name: myName,
                 avatar: currentUser.photoURL || `https://placehold.co/96x96.png`,
-                isMuted: true,
+                isMuted: myRole === 'listener', // Mute unless creator
                 role: myRole,
             });
             
@@ -217,8 +235,12 @@ export default function AudioRoomPage() {
                 setIsMuted(false);
             }
 
-            const currentParticipants = await getDocs(collection(roomDocRef, "participants"));
-            await updateDoc(roomDocRef, { participantsCount: currentParticipants.size });
+            try {
+                const currentParticipants = await getDocs(collection(roomDocRef, "participants"));
+                await updateDoc(roomDocRef, { participantsCount: currentParticipants.size });
+            } catch(e) {
+                console.warn("Could not update participant count, room may have been deleted.");
+            }
             
             setIsLoading(false);
 
@@ -234,8 +256,9 @@ export default function AudioRoomPage() {
                 setParticipants(latestParticipants);
 
                 const myData = latestParticipants.find(p => p.id === myId);
-                if (myData?.role !== 'listener' && localStreamRef.current) {
+                if (myData && myData.role !== 'listener' && localStreamRef.current) {
                     const wasMuted = localStreamRef.current.getAudioTracks().every(t => !t.enabled);
+                    // Unmute if role is speaker and currently muted
                     if (wasMuted) {
                         localStreamRef.current.getAudioTracks().forEach(track => track.enabled = true);
                         setIsMuted(false);
@@ -248,41 +271,50 @@ export default function AudioRoomPage() {
 
                 for (const participant of latestParticipants) {
                     if (participant.id !== myId && !peersRef.current[participant.id]) {
-                        const peer = new Peer({
-                             initiator: myId > participant.id,
-                             trickle: false,
-                             stream: localStreamRef.current!,
-                             config: { iceServers }
-                        });
-                        
-                        peer.on('signal', async (signalData) => {
-                            await addDoc(collection(db, "audioRooms", roomId, "signals"), {
-                                to: participant.id, from: myId, fromName: myName, signal: JSON.stringify(signalData),
+                        // Create a new peer connection
+                         try {
+                            const peer = new Peer({
+                                initiator: myId > participant.id,
+                                trickle: false,
+                                stream: localStreamRef.current!,
+                                config: { iceServers }
                             });
-                        });
-                        
-                        peer.on('stream', (stream) => {
-                             setRemoteStreams(prev => {
-                                if (prev.some(s => s.peerId === participant.id)) return prev;
-                                return [...prev, { peerId: participant.id, stream }];
-                             });
-                        });
-                        
-                        peer.on('error', (err) => {
-                             console.error(`[PEER ERROR] to ${participant.id}:`, err);
-                             if (peersRef.current[participant.id]) {
-                                peersRef.current[participant.id].destroy();
-                                delete peersRef.current[participant.id];
+                            
+                            peer.on('signal', async (signalData) => {
+                                try {
+                                    await addDoc(collection(db, "audioRooms", roomId, "signals"), {
+                                        to: participant.id, from: myId, fromName: myName, signal: JSON.stringify(signalData),
+                                    });
+                                } catch (error) {
+                                    console.error(`Error sending signal to ${participant.id}`, error);
+                                }
+                            });
+                            
+                            peer.on('stream', (stream) => {
+                                setRemoteStreams(prev => {
+                                    if (prev.some(s => s.peerId === participant.id)) return prev;
+                                    return [...prev, { peerId: participant.id, stream }];
+                                });
+                            });
+                            
+                            peer.on('error', (err) => {
+                                console.error(`[PEER ERROR] to ${participant.id}:`, err);
+                                if (peersRef.current[participant.id]) {
+                                    peersRef.current[participant.id].destroy();
+                                    delete peersRef.current[participant.id];
+                                    setRemoteStreams(prev => prev.filter(s => s.peerId !== participant.id));
+                                }
+                            });
+                            
+                            peer.on('close', () => {
                                 setRemoteStreams(prev => prev.filter(s => s.peerId !== participant.id));
-                            }
-                        });
-                        
-                        peer.on('close', () => {
-                             setRemoteStreams(prev => prev.filter(s => s.peerId !== participant.id));
-                             if (peersRef.current[participant.id]) delete peersRef.current[participant.id];
-                        });
+                                if (peersRef.current[participant.id]) delete peersRef.current[participant.id];
+                            });
 
-                        peersRef.current[participant.id] = peer;
+                            peersRef.current[participant.id] = peer;
+                        } catch (err) {
+                            console.error("Error creating peer:", err);
+                        }
                     }
                 }
                 for (const peerId of existingPeerIds) {
@@ -304,10 +336,14 @@ export default function AudioRoomPage() {
                         const data = change.doc.data();
                         const fromId = data.from;
                         const peer = peersRef.current[fromId];
-                        if (peer && !peer.destroyed) {
-                             peer.signal(JSON.parse(data.signal));
+                         try {
+                            if (peer && !peer.destroyed) {
+                                peer.signal(JSON.parse(data.signal));
+                            }
+                            await deleteDoc(change.doc.ref);
+                        } catch (err) {
+                            console.error(`Error processing signal from ${fromId}:`, err);
                         }
-                        await deleteDoc(change.doc.ref);
                     }
                 });
             });
@@ -375,6 +411,18 @@ export default function AudioRoomPage() {
         router.push('/sound-sphere'); 
     };
 
+    const handleEndRoom = async () => {
+        if (!db || !currentUser || room?.creatorId !== currentUser.uid) return;
+        try {
+            await deleteDoc(doc(db, "audioRooms", roomId));
+        } catch(error) {
+            console.error("Error ending room:", error);
+        } finally {
+            router.push('/sound-sphere');
+        }
+    };
+
+
     const handleMuteToggle = async () => {
         if (!localStreamRef.current || !currentUser || !db) return;
         const myData = participants.find(p => p.id === currentUser.uid);
@@ -389,7 +437,9 @@ export default function AudioRoomPage() {
             await updateDoc(participantRef, { isMuted: newMutedState });
         } catch (error) {
             console.error("Error updating mute state:", error);
-            toast({ title: "Error", description: "Could not sync mute state.", variant: "destructive" });
+            if (error instanceof Error && (error as any).code !== 'not-found') {
+                 toast({ title: "Error", description: "Could not sync mute state.", variant: "destructive" });
+            }
         }
     };
     
@@ -414,7 +464,11 @@ export default function AudioRoomPage() {
         const requestRef = doc(db, "audioRooms", roomId, "requests", requesterId);
         if (accept) {
             const participantRef = doc(db, "audioRooms", roomId, "participants", requesterId);
-            await updateDoc(participantRef, { role: 'speaker', isMuted: false });
+            try {
+                await updateDoc(participantRef, { role: 'speaker', isMuted: false });
+            } catch(e) {
+                console.warn("Participant may have left before being accepted.");
+            }
         }
         await deleteDoc(requestRef);
     };
@@ -476,9 +530,40 @@ export default function AudioRoomPage() {
         }
     };
 
+    const handlePinLink = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!db || !linkToPin.trim()) return;
+        try {
+            const roomRef = doc(db, "audioRooms", roomId);
+            await updateDoc(roomRef, { pinnedLink: linkToPin });
+            toast({ title: "Link Pinned" });
+            setIsPinLinkDialogOpen(false);
+            setLinkToPin('');
+        } catch (error) {
+            if (error instanceof Error && (error as any).code !== 'not-found') {
+                console.error("Error pinning link:", error);
+                toast({ title: "Error", description: "Could not pin the link.", variant: "destructive" });
+            }
+        }
+    };
+    
+    const handleUnpinLink = async () => {
+        if (!db) return;
+        try {
+            const roomRef = doc(db, "audioRooms", roomId);
+            await updateDoc(roomRef, { pinnedLink: '' });
+            toast({ title: "Link Unpinned" });
+        } catch (error) {
+            if (error instanceof Error && (error as any).code !== 'not-found') {
+                console.error("Error unpinning link:", error);
+                toast({ title: "Error", description: "Could not unpin the link.", variant: "destructive" });
+            }
+        }
+    };
+
 
     if (isLoading || !room || !currentUser) {
-        return <SubpageLayout title="Sound Sphere Room"><div className="text-center">Loading room...</div></SubpageLayout>;
+        return <SubpageLayout title="Sound Sphere Room" backHref="/sound-sphere"><div className="text-center">Loading room...</div></SubpageLayout>;
     }
 
     const isCreator = currentUser?.uid === room.creatorId;
@@ -501,7 +586,7 @@ export default function AudioRoomPage() {
             disabled={p.id === currentUser.uid}
             className="relative flex flex-col items-center gap-2 cursor-pointer transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-70"
         >
-            <Avatar className={`h-20 w-20 border-4 ${(p.role === 'creator' || p.role === 'speaker') && !p.isMuted ? 'border-green-500 animate-pulse' : 'border-transparent'}`}>
+            <Avatar className={`h-20 w-20 border-4 transition-colors ${(p.role === 'creator' || p.role === 'speaker') && !p.isMuted ? 'border-green-500 animate-pulse' : 'border-transparent'}`}>
                 <AvatarImage src={p.avatar} data-ai-hint="person portrait"/>
                 <AvatarFallback>{p.name?.[0]}</AvatarFallback>
             </Avatar>
@@ -515,11 +600,35 @@ export default function AudioRoomPage() {
     );
 
     return (
-        <SubpageLayout title={room.title}>
+        <SubpageLayout title={room.title} description={room.description} backHref="/sound-sphere">
             {remoteStreams.map(remote => <AudioPlayer key={remote.peerId} stream={remote.stream} />)}
             <div className="mx-auto max-w-4xl text-center space-y-8">
-                <p className="text-muted-foreground">{room.description}</p>
-                
+                {pinnedLink && (
+                     <Card>
+                        <CardContent className="p-3 flex items-center justify-between">
+                             <div className="flex items-center gap-3">
+                                 <LinkIcon className="h-5 w-5 text-primary"/>
+                                 <a href={pinnedLink} target="_blank" rel="noopener noreferrer" className="text-sm font-medium hover:underline truncate">
+                                     {pinnedLink}
+                                 </a>
+                             </div>
+                             {canSpeak && (
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                                            <MoreVertical className="h-4 w-4" />
+                                        </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent>
+                                        <DropdownMenuItem onClick={handleUnpinLink}>
+                                            <X className="mr-2 h-4 w-4"/> Unpin Link
+                                        </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                             )}
+                        </CardContent>
+                    </Card>
+                )}
                  {isCreator && speakingRequests.length > 0 && (
                      <Card className="border-primary">
                         <CardHeader>
@@ -621,9 +730,30 @@ export default function AudioRoomPage() {
                         )}
                     </DialogContent>
                 </Dialog>
+                 <Dialog open={isPinLinkDialogOpen} onOpenChange={setIsPinLinkDialogOpen}>
+                    <DialogContent>
+                        <DialogHeader>
+                            <DialogTitle>Pin a Link</DialogTitle>
+                            <DialogDescription>
+                                Share a relevant link with everyone in the room. It will appear at the top.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <form onSubmit={handlePinLink}>
+                            <div className="grid gap-4 py-4">
+                                <Input 
+                                    placeholder="https://example.com" 
+                                    value={linkToPin} 
+                                    onChange={(e) => setLinkToPin(e.target.value)}
+                                />
+                            </div>
+                            <Button type="submit">Pin Link</Button>
+                        </form>
+                    </DialogContent>
+                </Dialog>
 
                 <div className="flex justify-center gap-4">
                      {canSpeak ? (
+                        <>
                         <Button
                             variant={isMuted ? 'secondary' : 'outline'}
                             size="lg"
@@ -634,6 +764,11 @@ export default function AudioRoomPage() {
                             {isMuted ? <MicOff className="mr-2 h-5 w-5" /> : <Mic className="mr-2 h-5 w-5" />}
                             {isMuted ? 'Unmute' : 'Mute'}
                         </Button>
+                        <Button variant="outline" size="lg" onClick={() => setIsPinLinkDialogOpen(true)}>
+                            <LinkIcon className="mr-2 h-5 w-5" />
+                            Pin Link
+                        </Button>
+                        </>
                      ) : (
                          <Button
                             size="lg"
@@ -650,7 +785,7 @@ export default function AudioRoomPage() {
                         Leave
                     </Button>
                     {isCreator && (
-                        <Button variant="destructive" size="lg" onClick={handleLeaveRoom}>
+                        <Button variant="destructive" size="lg" onClick={handleEndRoom}>
                             <XCircle className="mr-2 h-5 w-5" />
                             End Room
                         </Button>
