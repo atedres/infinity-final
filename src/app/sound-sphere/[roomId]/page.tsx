@@ -125,7 +125,7 @@ export default function AudioRoomPage() {
 
     // Main setup effect
     useEffect(() => {
-        if (!currentUser || !roomId || !db) return;
+        if (typeof window === 'undefined' || !currentUser || !roomId || !db) return;
 
         const myId = currentUser.uid;
         const myName = currentUser.displayName || 'Anonymous';
@@ -136,7 +136,7 @@ export default function AudioRoomPage() {
         let unsubRequests: () => void = () => {};
 
         const cleanup = async () => {
-            console.log(`[CLEANUP] Cleaning up for user ${myId}`);
+            console.log(`[CLEANUP] Cleaning up for user ${myId} in room ${roomId}`);
 
             localStreamRef.current?.getTracks().forEach(track => track.stop());
             localStreamRef.current = null;
@@ -150,29 +150,29 @@ export default function AudioRoomPage() {
             unsubRequests();
             
             if (!db) return;
-            
-            const participantRef = doc(db, "audioRooms", roomId, "participants", myId);
-             try {
-                const participantSnap = await getDoc(participantRef);
-                if (participantSnap.exists()) {
-                    await deleteDoc(participantRef);
+
+            try {
+                const participantRef = doc(db, "audioRooms", roomId, "participants", myId);
+                await deleteDoc(participantRef).catch(() => {}); // Try to delete, ignore if it's already gone
+
+                const roomRef = doc(db, "audioRooms", roomId);
+                const roomSnap = await getDoc(roomRef);
+
+                if (roomSnap.exists()) {
+                    const participantsCollectionRef = collection(roomRef, "participants");
+                    const remainingParticipantsSnap = await getDocs(participantsCollectionRef);
                     
-                    const roomRef = doc(db, "audioRooms", roomId);
-                    const remainingParticipantsSnap = await getDocs(collection(roomRef, "participants"));
-                    
-                    if (remainingParticipantsSnap.empty) {
-                        // I was the last one, delete the room
+                    if (remainingParticipantsSnap.size === 0) {
+                        console.log(`[CLEANUP] Room ${roomId} is empty, deleting.`);
                         await deleteDoc(roomRef);
-                        console.log(`[CLEANUP] Room ${roomId} was empty and has been deleted.`);
                     } else {
-                        // Just update the count for remaining participants
                         await updateDoc(roomRef, { participantsCount: remainingParticipantsSnap.size });
                     }
+                } else {
+                    console.log(`[CLEANUP] Room ${roomId} already deleted.`);
                 }
             } catch (error) {
-                 if (error instanceof Error && (error as any).code !== 'not-found') {
-                    console.error("[CLEANUP] Error during firestore cleanup: ", error);
-                 }
+                console.error("[CLEANUP] Error during firestore cleanup: ", error);
             }
         };
 
@@ -585,7 +585,6 @@ export default function AudioRoomPage() {
     
     const speakers = participants.filter(p => p.role === 'creator' || p.role === 'speaker');
     const listeners = participants.filter(p => p.role === 'listener');
-    const streamMap = new Map(remoteStreams.map(s => [s.peerId, s.stream]));
     
     const renderParticipant = (p: Participant) => {
         const isUnmutedSpeaker = (p.role === 'creator' || p.role === 'speaker') && !p.isMuted;
