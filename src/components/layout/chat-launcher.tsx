@@ -11,8 +11,8 @@ import 'webrtc-adapter';
 import { db, auth } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetFooter } from '@/components/ui/sheet';
-import { Dialog } from '@/components/ui/dialog';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent as AlertDialogContentComponent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -175,22 +175,29 @@ export function ChatLauncher() {
         );
 
         const unsubscribe = onSnapshot(chatsQuery, async (snapshot) => {
+            const isInitialLoad = isInitialChatsLoad.current;
+            if (isInitialChatsLoad.current) {
+                isInitialChatsLoad.current = false;
+            }
 
-            if (!isInitialChatsLoad.current) {
-                const hasNewMessageForMe = snapshot.docChanges().some(change => {
-                    if (change.type === 'modified') {
-                        const oldChat = conversationsRef.current.find(c => c.id === change.doc.id);
-                        const oldUnread = oldChat?.unreadCount || 0;
-                        const newUnread = change.doc.data().unreadCounts?.[currentUser.uid] || 0;
-                        
-                        return newUnread > oldUnread && selectedChatRef.current?.id !== change.doc.id;
-                    }
-                    return false;
-                });
+            const hadNewMessageForMe = snapshot.docChanges().some(change => {
+                if (change.type === 'added' || change.type === 'modified') {
+                    const data = change.doc.data();
+                    const oldChat = conversationsRef.current.find(c => c.id === change.doc.id);
+                    const oldUnread = oldChat?.unreadCount || 0;
+                    const newUnread = data.unreadCounts?.[currentUser.uid] || 0;
 
-                if (hasNewMessageForMe) {
-                    playMessageSound();
+                    // It's a new message for me if the unread count increased and I'm not looking at that chat
+                    const isNewUnread = newUnread > oldUnread;
+                    const isNotSelectedChat = selectedChatRef.current?.id !== change.doc.id;
+
+                    return isNewUnread && isNotSelectedChat;
                 }
+                return false;
+            });
+            
+            if (!isInitialLoad && hadNewMessageForMe) {
+                 playMessageSound();
             }
 
 
@@ -199,15 +206,21 @@ export function ChatLauncher() {
             
             const enrichedChats = await Promise.all(chatsData.map(async (chat) => {
                 const otherId = chat.participants.find(p => p !== currentUser.uid) || '';
+                
+                // Get the other participant's name and avatar
                 const otherName = chat.participantNames?.[otherId] || 'User';
                 const unreadCount = chat.unreadCounts?.[currentUser.uid] || 0;
                 unreadSum += unreadCount;
 
                 let otherAvatar = '';
                 if (otherId) {
-                    const userDoc = await getDoc(doc(db, "users", otherId));
-                    if (userDoc.exists()) {
-                        otherAvatar = userDoc.data().photoURL || '';
+                    try {
+                        const userDoc = await getDoc(doc(db, "users", otherId));
+                        if (userDoc.exists()) {
+                            otherAvatar = userDoc.data().photoURL || '';
+                        }
+                    } catch (error) {
+                         console.error("Could not fetch user avatar for chat list", error);
                     }
                 }
 
@@ -220,10 +233,6 @@ export function ChatLauncher() {
             
             setConversations(enrichedChats);
             setTotalUnread(unreadSum);
-            
-            if (isInitialChatsLoad.current) {
-                isInitialChatsLoad.current = false;
-            }
 
         }, (error) => {
             console.error("Firestore chat listener error: ", error);
@@ -457,23 +466,30 @@ export function ChatLauncher() {
         const messagesRef = collection(db, "chats", selectedChat.id, "messages");
         
         try {
-            await addDoc(messagesRef, {
+             // Create a batch write
+            const batch = writeBatch(db);
+
+            // Add the new message
+            const newMessageRef = doc(collection(db, "chats", selectedChat.id, "messages"));
+            batch.set(newMessageRef, {
                 text: newMessage,
                 senderId: currentUser.uid,
                 timestamp: serverTimestamp(),
             });
 
-            await setDoc(chatDocRef, {
+            // Update the chat document
+            batch.set(chatDocRef, {
                     lastMessage: newMessage,
                     lastUpdate: serverTimestamp(),
                     participants: selectedChat.participants,
                     participantNames: selectedChat.participantNames,
                     unreadCounts: {
                         [otherId]: increment(1),
-                        [currentUser.uid]: 0
                     }
                 }, { merge: true }
             );
+
+            await batch.commit();
 
             setNewMessage('');
         } catch (error) {
@@ -490,6 +506,7 @@ export function ChatLauncher() {
         if (chat.unreadCount > 0) {
             try {
                 const chatDocRef = doc(db, "chats", chat.id);
+                // Use set with merge to avoid overwriting the whole document
                 await setDoc(chatDocRef, {
                     unreadCounts: {
                         [currentUser.uid]: 0
@@ -560,7 +577,7 @@ export function ChatLauncher() {
             {remoteStream && <AudioPlayer stream={remoteStream} />}
             <CallDialog />
              <AlertDialog open={callState === 'receiving'}>
-                <AlertDialogContent>
+                <AlertDialogContentComponent>
                     <AlertDialogHeader className="items-center">
                          <Avatar className="h-20 w-20">
                             <AvatarImage src={incomingCall?.fromAvatar} alt={incomingCall?.fromName}/>
@@ -579,7 +596,7 @@ export function ChatLauncher() {
                             <Button variant="default" size="lg" className="rounded-full bg-green-600 hover:bg-green-700" onClick={answerCall}>Accept</Button>
                         </AlertDialogAction>
                     </AlertDialogFooter>
-                </AlertDialogContent>
+                </AlertDialogContentComponent>
             </AlertDialog>
 
             <Sheet open={isOpen} onOpenChange={setIsOpen}>
@@ -679,5 +696,3 @@ export function ChatLauncher() {
         </>
     );
 }
-
-    
