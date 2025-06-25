@@ -601,7 +601,7 @@ export default function AudioRoomPage() {
     return (
         <SubpageLayout title={room.title} backHref="/sound-sphere" showTitle={false}>
             {remoteStreams.map(remote => <AudioPlayer key={remote.peerId} stream={remote.stream} />)}
-            <div className="mx-auto max-w-4xl text-center space-y-8">
+            <div className="mx-auto max-w-4xl space-y-8">
                  <div>
                     <h1 className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl font-headline">{room.title}</h1>
                     <p className="mt-2 text-lg text-muted-foreground">{room.description}</p>
@@ -798,3 +798,5 @@ export default function AudioRoomPage() {
         </SubpageLayout>
     );
 }
+
+    
