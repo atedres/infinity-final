@@ -989,9 +989,10 @@ export default function SoundSpherePage() {
                                     <Card className="hover:shadow-lg transition-shadow duration-300 h-full">
                                         <CardContent className="p-6">
                                             <div className="flex items-center gap-4 mb-3">
-                                                <div className="bg-primary/10 p-3 rounded-full">
-                                                    <Mic className="h-6 w-6 text-primary"/>
-                                                </div>
+                                                <Avatar className="h-12 w-12">
+                                                    <AvatarImage src={room.creatorAvatar} />
+                                                    <AvatarFallback>{room.creatorName?.[0]}</AvatarFallback>
+                                                </Avatar>
                                                 <div className="flex-1 space-y-1">
                                                     <h4 className="font-semibold text-lg leading-tight group-hover:text-primary transition-colors">{room.title}</h4>
                                                     <p className="text-sm text-muted-foreground break-words line-clamp-2">{room.description || `A conversation started by ${room.creatorName}`}</p>
