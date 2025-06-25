@@ -18,6 +18,7 @@ import { Mic, MicOff, LogOut, XCircle, Hand, Check, X, Users, Headphones, UserPl
 import Peer from 'simple-peer';
 import type { Instance as PeerInstance } from 'simple-peer';
 import 'webrtc-adapter';
+import { cn } from '@/lib/utils';
 
 
 interface Room {
@@ -64,6 +65,72 @@ const iceServers = [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
 ];
+
+const ParticipantAvatar = ({ participant, stream }: { participant: Participant; stream: MediaStream | null }) => {
+    const [isSpeaking, setIsSpeaking] = useState(false);
+    const animationFrameId = useRef<number>();
+    const audioContextRef = useRef<AudioContext>();
+
+    useEffect(() => {
+        if (!stream || participant.isMuted || participant.role === 'listener') {
+            setIsSpeaking(false);
+            if (animationFrameId.current) cancelAnimationFrame(animationFrameId.current);
+            if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+                audioContextRef.current.close();
+            }
+            return;
+        }
+
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        audioContextRef.current = audioContext;
+
+        const analyser = audioContext.createAnalyser();
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(analyser);
+        analyser.fftSize = 512;
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        const checkVolume = () => {
+            if (analyser && audioContext.state === 'running') {
+                analyser.getByteFrequencyData(dataArray);
+                let sum = 0;
+                for(let i = 0; i < bufferLength; i++) {
+                    sum += dataArray[i];
+                }
+                const average = sum / bufferLength;
+                
+                setIsSpeaking(average > 15);
+                
+                animationFrameId.current = requestAnimationFrame(checkVolume);
+            }
+        };
+
+        checkVolume();
+
+        return () => {
+            if (animationFrameId.current) cancelAnimationFrame(animationFrameId.current);
+            if (source) source.disconnect();
+            if (analyser) analyser.disconnect();
+            if (audioContext && audioContext.state !== 'closed') {
+               audioContext.close();
+            }
+        };
+    }, [stream, participant.isMuted, participant.role]);
+    
+    const isUnmutedSpeaker = (participant.role === 'creator' || participant.role === 'speaker') && !participant.isMuted;
+    
+    return (
+        <Avatar className={cn(
+            'h-20 w-20 border-4 transition-all duration-200',
+            isUnmutedSpeaker ? 'border-green-500' : 'border-transparent',
+            isSpeaking ? 'scale-110 shadow-lg shadow-green-500/50' : 'scale-100'
+        )}>
+            <AvatarImage src={participant.avatar} data-ai-hint="person portrait"/>
+            <AvatarFallback>{participant.name?.[0]}</AvatarFallback>
+        </Avatar>
+    );
+};
 
 
 export default function AudioRoomPage() {
@@ -404,7 +471,7 @@ export default function AudioRoomPage() {
 
 
     const handleLeaveRoom = () => {
-        router.push('/sound-sphere'); 
+        router.push('/sound-sphere?tab=rooms'); 
     };
 
     const handleEndRoom = async () => {
@@ -575,30 +642,32 @@ export default function AudioRoomPage() {
     
     const speakers = participants.filter(p => p.role === 'creator' || p.role === 'speaker');
     const listeners = participants.filter(p => p.role === 'listener');
+    const streamMap = new Map(remoteStreams.map(s => [s.peerId, s.stream]));
     
-    const renderParticipant = (p: Participant) => (
-        <button
-            key={p.id}
-            onClick={() => {
-                if (p.id !== currentUser.uid) {
-                    setSelectedUser(p);
-                }
-            }}
-            disabled={p.id === currentUser.uid}
-            className="relative flex flex-col items-center gap-2 cursor-pointer transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-70"
-        >
-            <Avatar className={`h-20 w-20 border-4 transition-colors ${(p.role === 'creator' || p.role === 'speaker') && !p.isMuted ? 'border-green-500 animate-pulse' : 'border-transparent'}`}>
-                <AvatarImage src={p.avatar} data-ai-hint="person portrait"/>
-                <AvatarFallback>{p.name?.[0]}</AvatarFallback>
-            </Avatar>
-            {(p.isMuted || p.role === 'listener') && (
-                <div className="absolute top-1 right-1 bg-slate-700 rounded-full p-1 border-2 border-background">
-                    <MicOff className="h-3 w-3 text-slate-100" />
-                </div>
-            )}
-            <p className="font-medium text-sm truncate w-full text-center">{p.name}</p>
-        </button>
-    );
+    const renderParticipant = (p: Participant) => {
+        const stream = p.id === currentUser?.uid ? localStreamRef.current : streamMap.get(p.id) || null;
+        
+        return (
+            <button
+                key={p.id}
+                onClick={() => {
+                    if (p.id !== currentUser.uid) {
+                        setSelectedUser(p);
+                    }
+                }}
+                disabled={p.id === currentUser.uid}
+                className="relative flex flex-col items-center gap-2 cursor-pointer transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+                <ParticipantAvatar participant={p} stream={stream} />
+                {(p.isMuted || p.role === 'listener') && (
+                    <div className="absolute top-1 right-1 bg-slate-700 rounded-full p-1 border-2 border-background">
+                        <MicOff className="h-3 w-3 text-slate-100" />
+                    </div>
+                )}
+                <p className="font-medium text-sm truncate w-full text-center">{p.name}</p>
+            </button>
+        );
+    };
 
     return (
         <SubpageLayout title={room.title} backHref="/sound-sphere?tab=rooms" showTitle={false}>
