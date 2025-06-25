@@ -11,8 +11,8 @@ import 'webrtc-adapter';
 import { db, auth } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetFooter } from '@/components/ui/sheet';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent as AlertDialogContentComponent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent as AlertDialogContentComponent, AlertDialogDescription as AlertDialogDescriptionComponent, AlertDialogFooter, AlertDialogHeader as AlertDialogHeaderComponent, AlertDialogTitle as AlertDialogTitleComponent } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -589,6 +589,10 @@ export function ChatLauncher() {
         return (
             <Dialog open={callState === 'active' || callState === 'calling'}>
                 <DialogContent className="sm:max-w-xs" onInteractOutside={(e) => e.preventDefault()}>
+                    <DialogHeader className="sr-only">
+                        <DialogTitle>Voice call with {name}</DialogTitle>
+                        <DialogDescription>An active voice call. You can mute your microphone or end the call.</DialogDescription>
+                    </DialogHeader>
                     <div className="flex flex-col items-center justify-center gap-4 py-8">
                         <Avatar className="h-24 w-24 border-2 border-primary">
                             <AvatarImage src={avatar} alt={name}/>
@@ -623,16 +627,16 @@ export function ChatLauncher() {
             <CallDialog />
              <AlertDialog open={callState === 'receiving'}>
                 <AlertDialogContentComponent>
-                    <AlertDialogHeader className="items-center">
+                    <AlertDialogHeaderComponent className="items-center">
                          <Avatar className="h-20 w-20">
                             <AvatarImage src={incomingCall?.fromAvatar} alt={incomingCall?.fromName}/>
                             <AvatarFallback className="text-2xl">{incomingCall?.fromName?.[0]}</AvatarFallback>
                         </Avatar>
-                        <AlertDialogTitle>{incomingCall?.fromName} is calling</AlertDialogTitle>
-                        <AlertDialogDescription>
+                        <AlertDialogTitleComponent>{incomingCall?.fromName} is calling</AlertDialogTitleComponent>
+                        <AlertDialogDescriptionComponent>
                             Do you want to accept the call?
-                        </AlertDialogDescription>
-                    </AlertDialogHeader>
+                        </AlertDialogDescriptionComponent>
+                    </AlertDialogHeaderComponent>
                     <AlertDialogFooter className="justify-center">
                         <AlertDialogCancel asChild>
                             <Button variant="destructive" size="lg" className="rounded-full" onClick={declineCall}>Decline</Button>
