@@ -156,12 +156,18 @@ export default function AudioRoomPage() {
                 const participantSnap = await getDoc(participantRef);
                 if (participantSnap.exists()) {
                     await deleteDoc(participantRef);
+                    
                     const roomRef = doc(db, "audioRooms", roomId);
                     const remainingParticipantsSnap = await getDocs(collection(roomRef, "participants"));
-                    if (remainingParticipantsSnap.size > 0) {
+                    
+                    if (remainingParticipantsSnap.empty) {
+                        // I was the last one, delete the room
+                        await deleteDoc(roomRef);
+                        console.log(`[CLEANUP] Room ${roomId} was empty and has been deleted.`);
+                    } else {
+                        // Just update the count for remaining participants
                         await updateDoc(roomRef, { participantsCount: remainingParticipantsSnap.size });
                     }
-                    // Do not delete the room if I am the last one, let the creator do that explicitly
                 }
             } catch (error) {
                  if (error instanceof Error && (error as any).code !== 'not-found') {
