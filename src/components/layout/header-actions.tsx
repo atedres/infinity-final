@@ -3,14 +3,11 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import {
-  Briefcase,
-  Mic,
   LogOut,
   User as UserIcon,
   Bell,
-  Home,
+  Settings,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -29,19 +26,19 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, User, signInWithPopup, updateProfile } from "firebase/auth";
-import { doc, setDoc, getDoc, serverTimestamp, collection, query, where, onSnapshot, orderBy, writeBatch } from "firebase/firestore";
+import { doc, setDoc, getDoc, serverTimestamp, collection, query, where, onSnapshot, orderBy, getDocs, writeBatch } from "firebase/firestore";
 import { auth, db, googleProvider } from "@/lib/firebase";
 import { formatDistanceToNow } from 'date-fns';
+import { ThemeToggle } from './theme-toggle';
 
 
 interface Notification {
   id: string;
   actorName: string;
   type: 'follow' | 'like' | 'comment';
-  entityId: string; // The ID of the post, user, etc.
+  entityId: string;
   read: boolean;
-  createdAt: any; // Keep it as Firestore timestamp
-  // These will be constructed
+  createdAt: any;
   text: string;
   href: string;
   time: string;
@@ -127,6 +124,10 @@ export function HeaderActions() {
                 where("read", "==", false)
             );
             const unreadSnapshot = await getDocs(unreadNotifsQuery);
+             if (unreadSnapshot.empty) {
+                setHasUnread(false);
+                return;
+            }
             const batch = writeBatch(db);
             unreadSnapshot.docs.forEach(doc => {
                 batch.update(doc.ref, { read: true });
@@ -271,13 +272,14 @@ export function HeaderActions() {
         <>
             <div className="flex items-center space-x-2">
                 {user ? (
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-1">
+                    <ThemeToggle />
                     <DropdownMenu onOpenChange={handleOpenNotifications}>
                         <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="icon" className="relative h-9 w-9 rounded-full">
                                 <Bell className="h-5 w-5" />
                                 {hasUnread && (
-                                    <span className="absolute top-0 right-0 flex h-2 w-2">
+                                    <span className="absolute top-1 right-1 flex h-2 w-2">
                                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
                                         <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
                                     </span>
@@ -290,7 +292,7 @@ export function HeaderActions() {
                             <DropdownMenuSeparator />
                             {notifications.length > 0 ? (
                                 notifications.map(notification => (
-                                    <DropdownMenuItem key={notification.id} asChild className="cursor-pointer">
+                                    <DropdownMenuItem key={notification.id} asChild className="cursor-pointer !block">
                                         <Link href={notification.href} className="flex flex-col items-start gap-1 w-full">
                                             <p className="text-sm leading-tight whitespace-normal">{notification.text}</p>
                                             <p className="text-xs text-muted-foreground">{notification.time}</p>
@@ -328,6 +330,12 @@ export function HeaderActions() {
                                     <span>Profile</span>
                                 </Link>
                             </DropdownMenuItem>
+                             <DropdownMenuItem asChild>
+                                <Link href="/settings">
+                                    <Settings className="mr-2 h-4 w-4" />
+                                    <span>Settings</span>
+                                </Link>
+                            </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={handleSignOut}>
                                 <LogOut className="mr-2 h-4 w-4" />
@@ -338,6 +346,7 @@ export function HeaderActions() {
                 </div>
                 ) : (
                     <div className="flex items-center space-x-2">
+                        <ThemeToggle />
                         <Button variant="ghost" onClick={() => handleAuthDialogOpen('login')}>
                             Login
                         </Button>
