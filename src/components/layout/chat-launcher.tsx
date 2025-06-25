@@ -97,10 +97,26 @@ export function ChatLauncher() {
             }));
             
             setConversations(enrichedChats);
+        }, (error) => {
+            console.error("Firestore chat listener error: ", error);
+            if (error.code === 'failed-precondition') {
+                toast({
+                    title: "Database Index Required",
+                    description: "A one-time database setup is needed. Check the browser's developer console for a direct link to create the required index.",
+                    variant: "destructive",
+                    duration: 15000,
+                });
+            } else {
+                 toast({
+                    title: "Error loading chats",
+                    description: "Could not retrieve your conversations.",
+                    variant: "destructive",
+                });
+            }
         });
 
         return () => unsubscribe();
-    }, [currentUser]);
+    }, [currentUser, toast]);
 
     // Fetch messages when a chat is selected
     useEffect(() => {
