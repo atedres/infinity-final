@@ -11,7 +11,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Mic, Users, MessageCircle, Heart, Share2, PlusCircle, UserPlus, Send, Newspaper, Radio, MoreHorizontal, Edit, Trash2, Repeat, ImagePlus, X, Search, Loader2 } from "lucide-react";
+import { Mic, Users, MessageCircle, Heart, Share2, PlusCircle, UserPlus, Send, Newspaper, Radio, MoreHorizontal, Edit, Trash2, Repeat, ImagePlus, X, Search, Loader2, CornerDownRight } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
@@ -33,7 +33,6 @@ interface OriginalPost {
     authorId: string;
     authorName: string;
     authorHandle: string;
-
     authorAvatar: string;
     content: string;
     createdAt: Timestamp;
@@ -55,7 +54,6 @@ interface Post {
     originalPost?: OriginalPost;
 }
 
-
 interface Room {
     id: string;
     creatorName: string;
@@ -73,6 +71,7 @@ interface Comment {
     authorAvatar: string;
     text: string;
     createdAt: Timestamp;
+    parentId?: string;
 }
 
 interface ProfileUser {
@@ -98,9 +97,11 @@ export default function SoundSpherePage() {
     const [imagePreviews, setImagePreviews] = useState<string[]>([]);
     const [followingIds, setFollowingIds] = useState<string[]>([]);
     const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
-    const [commentingOn, setCommentingOn] = useState<string | null>(null);
+    const [viewingCommentsFor, setViewingCommentsFor] = useState<string | null>(null);
     const [commentContent, setCommentContent] = useState('');
     const [postComments, setPostComments] = useState<Comment[]>([]);
+    const [replyingTo, setReplyingTo] = useState<string | null>(null);
+    const [replyContent, setReplyContent] = useState('');
     
     // Dialog states
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -135,6 +136,22 @@ export default function SoundSpherePage() {
     const [isSearching, setIsSearching] = useState(false);
     const [user, setUser] = useState<User | null>(null);
 
+    useEffect(() => {
+        const hash = window.location.hash;
+        if (hash) {
+            const elementId = hash.substring(1);
+            const element = document.getElementById(elementId);
+            if (element) {
+                setTimeout(() => {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    element.classList.add('bg-accent/20', 'transition-colors', 'duration-1000', 'rounded-lg');
+                    setTimeout(() => {
+                        element.classList.remove('bg-accent/20', 'transition-colors', 'duration-1000', 'rounded-lg');
+                    }, 2500);
+                }, 500);
+            }
+        }
+    }, []);
 
     useEffect(() => {
         if (!auth) return;
@@ -461,14 +478,15 @@ export default function SoundSpherePage() {
         }
     };
 
-    const handleCommentClick = async (postId: string) => {
+    const toggleCommentsView = async (postId: string) => {
         if (!db) return;
-        if (commentingOn === postId) {
-            setCommentingOn(null);
+        if (viewingCommentsFor === postId) {
+            setViewingCommentsFor(null);
             setPostComments([]);
         } else {
-            setCommentingOn(postId);
-            const commentsQuery = query(collection(db, "posts", postId, "comments"), orderBy("createdAt", "desc"));
+            setViewingCommentsFor(postId);
+            setReplyingTo(null);
+            const commentsQuery = query(collection(db, "posts", postId, "comments"), orderBy("createdAt", "asc"));
             const querySnapshot = await getDocs(commentsQuery);
             const commentsList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Comment);
             setPostComments(commentsList);
@@ -507,13 +525,66 @@ export default function SoundSpherePage() {
             }
 
             setCommentContent('');
+            setReplyingTo(null);
             fetchPosts(user.uid);
-            handleCommentClick(post.id);
+            
+            // Refetch comments for the post to show the new one
+            const commentsQuery = query(collection(db, "posts", post.id, "comments"), orderBy("createdAt", "asc"));
+            const snapshot = await getDocs(commentsQuery);
+            setPostComments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Comment));
+            
             toast({ title: "Comment posted!" });
 
         } catch (error) {
             console.error("Error posting comment:", error);
             toast({ title: "Error", description: "Could not post comment.", variant: "destructive"});
+        }
+    };
+
+    const handleReplySubmit = async (post: Post, parentCommentId: string) => {
+        if (!db || !user || !replyContent.trim()) {
+            toast({ title: "Error", description: "Please write a reply.", variant: "destructive"});
+            return;
+        }
+        try {
+            const commentsColRef = collection(db, "posts", post.id, "comments");
+            await addDoc(commentsColRef, {
+                authorId: user.uid,
+                authorName: user.displayName || 'Anonymous',
+                authorAvatar: user.photoURL || '',
+                text: replyContent,
+                parentId: parentCommentId,
+                createdAt: serverTimestamp(),
+            });
+
+            const postRef = doc(db, "posts", post.id);
+            await updateDoc(postRef, { comments: increment(1) });
+            
+            const parentComment = postComments.find(c => c.id === parentCommentId);
+            if (parentComment && user.uid !== parentComment.authorId) {
+                await addDoc(collection(db, "notifications"), {
+                    recipientId: parentComment.authorId,
+                    actorId: user.uid,
+                    actorName: user.displayName || 'Someone',
+                    type: 'comment',
+                    entityId: post.id,
+                    read: false,
+                    createdAt: serverTimestamp(),
+                });
+            }
+
+            setReplyContent('');
+            setReplyingTo(null);
+            
+            const commentsQuery = query(collection(db, "posts", post.id, "comments"), orderBy("createdAt", "asc"));
+            const snapshot = await getDocs(commentsQuery);
+            setPostComments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Comment));
+            
+            fetchPosts(user.uid);
+            toast({ title: "Reply posted!" });
+        } catch (error) {
+            console.error("Error posting reply:", error);
+            toast({ title: "Error", description: "Could not post reply.", variant: "destructive"});
         }
     };
     
@@ -757,6 +828,16 @@ export default function SoundSpherePage() {
                             {posts.map((post) => {
                                 const isPostOwner = user && user.uid === post.authorId;
                                 const isEditable = post.createdAt && (new Date().getTime() - post.createdAt.toDate().getTime()) < 15 * 60 * 1000;
+                                const topLevelComments = postComments.filter(comment => !comment.parentId);
+                                const repliesByParentId = postComments.reduce((acc, comment) => {
+                                    if (comment.parentId) {
+                                        if (!acc[comment.parentId]) {
+                                            acc[comment.parentId] = [];
+                                        }
+                                        acc[comment.parentId].push(comment);
+                                    }
+                                    return acc;
+                                }, {} as Record<string, Comment[]>);
                                 
                                 return (
                                 <Card key={post.id} id={`post-${post.id}`}>
@@ -871,7 +952,7 @@ export default function SoundSpherePage() {
                                                 )}
 
                                                 <div className="flex items-center justify-between text-muted-foreground pt-2">
-                                                    <Button variant="ghost" size="sm" className="flex items-center gap-2" onClick={() => handleCommentClick(post.id)}>
+                                                    <Button variant="ghost" size="sm" className="flex items-center gap-2" onClick={() => toggleCommentsView(post.id)}>
                                                         <MessageCircle className="h-4 w-4" /> {post.comments}
                                                     </Button>
                                                     <Button variant="ghost" size="sm" className="flex items-center gap-2" onClick={() => handleLikePost(post)}>
@@ -886,7 +967,7 @@ export default function SoundSpherePage() {
                                                         <Share2 className="h-4 w-4" /> Share
                                                     </Button>
                                                 </div>
-                                                {commentingOn === post.id && (
+                                                {viewingCommentsFor === post.id && (
                                                     <div className="mt-4 pt-4 border-t">
                                                         <form onSubmit={(e) => { e.preventDefault(); handleCommentSubmit(post); }} className="flex w-full items-start gap-2">
                                                             <Avatar className="h-9 w-9 mt-1">
@@ -903,23 +984,63 @@ export default function SoundSpherePage() {
                                                                 <Send className="h-4 w-4" />
                                                             </Button>
                                                         </form>
-                                                        <ScrollArea className="mt-4 pr-4 max-h-64">
+                                                        <ScrollArea className="mt-4 pr-4 max-h-96">
                                                             <div className="space-y-4">
-                                                                {postComments.map(comment => (
-                                                                    <div key={comment.id} className="flex items-start gap-3">
-                                                                        <Link href={`/profile/${comment.authorId}`}>
-                                                                            <Avatar className="h-8 w-8">
-                                                                                <AvatarImage src={comment.authorAvatar} />
-                                                                                <AvatarFallback>{comment.authorName.charAt(0)}</AvatarFallback>
-                                                                            </Avatar>
-                                                                        </Link>
-                                                                        <div className="bg-muted rounded-lg p-3 text-sm flex-1">
-                                                                            <div className="flex items-center justify-between">
-                                                                                <Link href={`/profile/${comment.authorId}`} className="font-semibold text-xs hover:underline">{comment.authorName}</Link>
-                                                                                <span className="text-xs text-muted-foreground">{comment.createdAt ? formatDistanceToNow(comment.createdAt.toDate(), { addSuffix: true }) : ''}</span>
+                                                                {topLevelComments.map(comment => (
+                                                                    <div key={comment.id}>
+                                                                        <div className="flex items-start gap-3">
+                                                                            <Link href={`/profile/${comment.authorId}`}>
+                                                                                <Avatar className="h-8 w-8">
+                                                                                    <AvatarImage src={comment.authorAvatar} />
+                                                                                    <AvatarFallback>{comment.authorName.charAt(0)}</AvatarFallback>
+                                                                                </Avatar>
+                                                                            </Link>
+                                                                            <div className="bg-muted rounded-lg p-3 text-sm flex-1">
+                                                                                <div className="flex items-center justify-between">
+                                                                                    <Link href={`/profile/${comment.authorId}`} className="font-semibold text-xs hover:underline">{comment.authorName}</Link>
+                                                                                    <span className="text-xs text-muted-foreground">{comment.createdAt ? formatDistanceToNow(comment.createdAt.toDate(), { addSuffix: true }) : ''}</span>
+                                                                                </div>
+                                                                                <p className="mt-1">{comment.text}</p>
                                                                             </div>
-                                                                            <p className="mt-1">{comment.text}</p>
                                                                         </div>
+                                                                        <div className="ml-11 pl-1 pt-1">
+                                                                             <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => setReplyingTo(replyingTo === comment.id ? null : comment.id)}>
+                                                                                Reply
+                                                                            </Button>
+                                                                        </div>
+
+                                                                        {replyingTo === comment.id && (
+                                                                            <form onSubmit={(e) => { e.preventDefault(); handleReplySubmit(post, comment.id); }} className="flex w-full items-start gap-2 ml-11 mt-2">
+                                                                                <Avatar className="h-8 w-8 mt-1">
+                                                                                    <AvatarImage src={user?.photoURL || ''} />
+                                                                                    <AvatarFallback>{user?.displayName?.charAt(0)}</AvatarFallback>
+                                                                                </Avatar>
+                                                                                <Textarea placeholder={`Replying to ${comment.authorName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} className="flex-1" rows={1}/>
+                                                                                <Button type="submit" size="icon" className="h-9 w-9 mt-1"><Send className="h-4 w-4" /></Button>
+                                                                            </form>
+                                                                        )}
+
+                                                                        {repliesByParentId[comment.id] && (
+                                                                            <div className="ml-6 mt-3 space-y-4 border-l-2 pl-5">
+                                                                                {repliesByParentId[comment.id].map(reply => (
+                                                                                    <div key={reply.id} className="flex items-start gap-3">
+                                                                                        <Link href={`/profile/${reply.authorId}`}>
+                                                                                            <Avatar className="h-8 w-8">
+                                                                                                <AvatarImage src={reply.authorAvatar} />
+                                                                                                <AvatarFallback>{reply.authorName.charAt(0)}</AvatarFallback>
+                                                                                            </Avatar>
+                                                                                        </Link>
+                                                                                         <div className="bg-muted rounded-lg p-3 text-sm flex-1">
+                                                                                            <div className="flex items-center justify-between">
+                                                                                                <Link href={`/profile/${reply.authorId}`} className="font-semibold text-xs hover:underline">{reply.authorName}</Link>
+                                                                                                <span className="text-xs text-muted-foreground">{reply.createdAt ? formatDistanceToNow(reply.createdAt.toDate(), { addSuffix: true }) : ''}</span>
+                                                                                            </div>
+                                                                                            <p className="mt-1">{reply.text}</p>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        )}
                                                                     </div>
                                                                 ))}
                                                             </div>
