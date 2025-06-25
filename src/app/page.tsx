@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { useState, useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -22,6 +23,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { generateImage } from '@/ai/flows/generate-image-flow';
+import { Skeleton } from '@/components/ui/skeleton';
 
 
 const features = [
@@ -87,6 +90,27 @@ const stats = [
 ]
 
 export default function Home() {
+  const [heroImage, setHeroImage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const getHeroImage = async () => {
+      try {
+        const prompt = "A vibrant, abstract representation of software innovation and collaboration. Interconnected nodes and glowing data streams on a dark background, evoking a sense of digital progress and connection. The style is modern, clean, and professional, with a minimalist aesthetic.";
+        const imageDataUri = await generateImage(prompt);
+        if (imageDataUri) {
+            setHeroImage(imageDataUri);
+        } else {
+            setHeroImage("https://placehold.co/600x400.png");
+        }
+      } catch (error) {
+        console.error("Failed to generate hero image:", error);
+        // Fallback to placeholder if generation fails
+        setHeroImage("https://placehold.co/600x400.png");
+      }
+    };
+    getHeroImage();
+  }, []);
+
   return (
     <div className="flex min-h-screen flex-col">
        <TooltipProvider>
@@ -147,14 +171,19 @@ export default function Home() {
                         </p>
                     </div>
                 </div>
-                <Image
-                    src="https://placehold.co/600x400.png"
-                    alt="Team working in an office"
-                    width={600}
-                    height={400}
-                    className="mx-auto aspect-[16/10] overflow-hidden rounded-xl object-cover object-center sm:w-full"
-                    data-ai-hint="office team"
-                />
+                {heroImage ? (
+                    <Image
+                        src={heroImage}
+                        alt="An abstract representation of software innovation and collaboration"
+                        width={600}
+                        height={400}
+                        className="mx-auto aspect-[16/10] overflow-hidden rounded-xl object-cover object-center sm:w-full"
+                        data-ai-hint="abstract technology"
+                        priority
+                    />
+                 ) : (
+                    <Skeleton className="mx-auto aspect-[16/10] w-full max-w-[600px] rounded-xl" />
+                 )}
             </div>
           </div>
         </section>
