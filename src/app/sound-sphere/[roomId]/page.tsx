@@ -436,7 +436,6 @@ export default function AudioRoomPage() {
         try {
             await updateDoc(participantRef, { isMuted: newMutedState });
         } catch (error) {
-            console.error("Error updating mute state:", error);
             if (error instanceof Error && (error as any).code !== 'not-found') {
                  toast({ title: "Error", description: "Could not sync mute state.", variant: "destructive" });
             }
@@ -600,9 +599,13 @@ export default function AudioRoomPage() {
     );
 
     return (
-        <SubpageLayout title={room.title} description={room.description} backHref="/sound-sphere">
+        <SubpageLayout title={room.title} backHref="/sound-sphere" showTitle={false}>
             {remoteStreams.map(remote => <AudioPlayer key={remote.peerId} stream={remote.stream} />)}
             <div className="mx-auto max-w-4xl text-center space-y-8">
+                 <div>
+                    <h1 className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl font-headline">{room.title}</h1>
+                    <p className="mt-2 text-lg text-muted-foreground">{room.description}</p>
+                </div>
                 {pinnedLink && (
                      <Card>
                         <CardContent className="p-3 flex items-center justify-between">
