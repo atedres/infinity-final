@@ -101,6 +101,8 @@ export function ChatLauncher() {
     const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
     const [isMuted, setIsMuted] = useState(false);
     const peerRef = useRef<PeerInstance | null>(null);
+    const incomingCallAudioRef = useRef<HTMLAudioElement | null>(null);
+    const outgoingCallAudioRef = useRef<HTMLAudioElement | null>(null);
 
 
     // Listen for auth changes
@@ -121,6 +123,49 @@ export function ChatLauncher() {
         });
         return () => unsubscribe();
     }, []);
+
+    // Call sound effect
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+
+        // Lazily create Audio elements
+        if (!incomingCallAudioRef.current) {
+            incomingCallAudioRef.current = new Audio('/incoming-call.mp3');
+            incomingCallAudioRef.current.loop = true;
+        }
+        if (!outgoingCallAudioRef.current) {
+            outgoingCallAudioRef.current = new Audio('/outgoing-call.mp3');
+            outgoingCallAudioRef.current.loop = true;
+        }
+
+        const playIncoming = () => incomingCallAudioRef.current?.play().catch(e => console.error("Error playing incoming call sound: ", e));
+        const playOutgoing = () => outgoingCallAudioRef.current?.play().catch(e => console.error("Error playing outgoing call sound: ", e));
+        
+        const stopAll = () => {
+            if (incomingCallAudioRef.current && !incomingCallAudioRef.current.paused) {
+                incomingCallAudioRef.current.pause();
+                incomingCallAudioRef.current.currentTime = 0;
+            }
+            if (outgoingCallAudioRef.current && !outgoingCallAudioRef.current.paused) {
+                outgoingCallAudioRef.current.pause();
+                outgoingCallAudioRef.current.currentTime = 0;
+            }
+        };
+
+        if (callState === 'receiving') {
+            stopAll();
+            playIncoming();
+        } else if (callState === 'calling') {
+            stopAll();
+            playOutgoing();
+        } else { // 'idle' or 'active'
+            stopAll();
+        }
+        
+        // Cleanup on component unmount
+        return stopAll; 
+
+    }, [callState]);
     
     // Global listener for P2P signals
     useEffect(() => {
@@ -161,7 +206,7 @@ export function ChatLauncher() {
         });
         
         return () => unsubscribe();
-    }, [currentUser]);
+    }, [currentUser, toast]);
 
 
     // Fetch and enrich conversations when user is logged in
@@ -463,7 +508,6 @@ export function ChatLauncher() {
         if (!otherId) return;
 
         const chatDocRef = doc(db, "chats", selectedChat.id);
-        const messagesRef = collection(db, "chats", selectedChat.id, "messages");
         
         try {
              // Create a batch write
@@ -485,6 +529,7 @@ export function ChatLauncher() {
                     participantNames: selectedChat.participantNames,
                     unreadCounts: {
                         [otherId]: increment(1),
+                        [currentUser.uid]: 0,
                     }
                 }, { merge: true }
             );
@@ -665,7 +710,7 @@ export function ChatLauncher() {
                                         onClick={() => handleSelectChat(chat)}
                                         className={cn(
                                             "w-full flex items-center gap-3 p-3 text-left hover:bg-muted border-b",
-                                            chat.unreadCount > 0 && "bg-accent/50 hover:bg-accent/80"
+                                            chat.unreadCount > 0 && "bg-primary/10 hover:bg-primary/20"
                                         )}
                                     >
                                         <Avatar>
