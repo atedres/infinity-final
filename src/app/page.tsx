@@ -149,11 +149,11 @@ export default function Home() {
                 </div>
                 <Image
                     src="https://placehold.co/600x400.png"
-                    alt="An abstract representation of software innovation and collaboration"
+                    alt="An illustration about startups, tech and investing in Morocco."
                     width={600}
                     height={400}
                     className="mx-auto aspect-[16/10] overflow-hidden rounded-xl object-cover object-center sm:w-full"
-                    data-ai-hint="abstract technology"
+                    data-ai-hint="startup morocco"
                     priority
                 />
             </div>
