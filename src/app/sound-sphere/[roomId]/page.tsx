@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from '@/hooks/use-toast';
 import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, collection, onSnapshot, setDoc, deleteDoc, updateDoc, increment, query, where, addDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, onSnapshot, setDoc, deleteDoc, updateDoc, increment, query, where, addDoc, getDocs } from 'firebase/firestore';
 import { Mic, MicOff, LogOut, XCircle } from 'lucide-react';
 import Peer from 'simple-peer';
 import type { Instance as PeerInstance, SignalData } from 'simple-peer';
@@ -123,7 +123,8 @@ export default function AudioRoomPage() {
                         } else {
                              console.log(`[CLEANUP] Removing participant from room.`);
                             await deleteDoc(participantRef);
-                            await updateDoc(roomRef, { participantsCount: increment(-1) });
+                            const remainingParticipants = await getDocs(collection(roomRef, "participants"));
+                            await updateDoc(roomRef, { participantsCount: remainingParticipants.size });
                         }
                     }
                 }
@@ -168,7 +169,10 @@ export default function AudioRoomPage() {
                 avatar: currentUser.photoURL || `https://placehold.co/96x96.png`,
                 isMuted: false,
             });
-            await updateDoc(roomDocRef, { participantsCount: increment(1) });
+
+            const currentParticipants = await getDocs(collection(roomDocRef, "participants"));
+            await updateDoc(roomDocRef, { participantsCount: currentParticipants.size });
+            
             setIsLoading(false);
 
 
@@ -185,8 +189,8 @@ export default function AudioRoomPage() {
                 for (const participant of latestParticipants) {
                     if (participant.id !== myId && !peersRef.current[participant.id]) {
                         console.log(`[PEER] Creating peer to connect with ${participant.name} (${participant.id})`);
-                        const isInitiator = myId < participant.id;
-                        console.log(`[PEER] I am ${isInitiator ? 'the initiator' : 'not the initiator'}.`);
+                        const isInitiator = myId > participant.id;
+                        console.log(`[PEER] I am ${isInitiator ? 'the initiator' : 'not the initiator'}. My ID: ${myId}, their ID: ${participant.id}`);
                         
                         const peer = new Peer({ initiator: isInitiator, trickle: false, stream: localStream! });
                         
@@ -210,7 +214,8 @@ export default function AudioRoomPage() {
 
                         peer.on('error', (err) => {
                             console.error(`[PEER ERROR] with ${participant.name} (${participant.id}):`, err);
-                            toast({variant: 'destructive', title: `Connection to ${participant.name} failed`})
+                            // This toast can be noisy if connections frequently fail and retry.
+                            // toast({variant: 'destructive', title: `Connection to ${participant.name} failed`})
                         });
 
                         peer.on('connect', () => console.log(`[CONNECTED] to ${participant.name}!`));
@@ -248,7 +253,7 @@ export default function AudioRoomPage() {
                         const data = change.doc.data();
                         const fromId = data.from;
                         const peer = peersRef.current[fromId];
-
+                        
                         if (peer && !peer.destroyed) {
                              console.log(`[SIGNAL] Received signal from ${data.fromName}. Applying.`);
                             peer.signal(JSON.parse(data.signal));
