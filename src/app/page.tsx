@@ -31,12 +31,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Separator } from '@/components/ui/separator';
 import { useToast } from "@/hooks/use-toast";
 import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, User, signInWithPopup, updateProfile } from "firebase/auth";
 import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db, googleProvider } from "@/lib/firebase";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 
 const features = [
@@ -262,134 +260,116 @@ export default function Home() {
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <TooltipProvider>
-            <div className="container flex h-14 max-w-screen-2xl items-center">
-                <div className="mr-6 flex items-center">
-                    <Link href="/" className="mr-6 flex items-center space-x-2">
-                    <InfinityIcon className="h-6 w-6 text-primary" />
-                    <span className="font-bold sm:inline-block">
-                        Infinity Hub
-                    </span>
-                    </Link>
-                </div>
-                <div className="flex flex-1 items-center justify-end space-x-2 md:space-x-4">
-                     <nav className="flex items-center space-x-1">
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-9 w-9" asChild>
-                                    <Link href="/sound-sphere">
-                                        <Mic className="h-5 w-5" />
-                                        <span className="sr-only">Sound Sphere</span>
-                                    </Link>
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                                <p>Sound Sphere</p>
-                            </TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-9 w-9" asChild>
-                                    <Link href="/join-project">
-                                        <Briefcase className="h-5 w-5" />
-                                        <span className="sr-only">Join Project</span>
-                                    </Link>
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                                <p>Join Project</p>
-                            </TooltipContent>
-                        </Tooltip>
-                    </nav>
+        <div className="container flex h-14 max-w-screen-2xl items-center px-4 md:px-6">
+            <Link href="/" className="mr-6 flex items-center space-x-2">
+                <InfinityIcon className="h-6 w-6 text-primary" />
+                <span className="font-bold sm:inline-block">
+                    Infinity Software
+                </span>
+            </Link>
+            <div className="flex flex-1 items-center justify-end space-x-2 md:space-x-4">
+                 <nav className="flex items-center gap-1 md:gap-2">
+                    <Button variant="ghost" asChild className="px-2">
+                        <Link href="/sound-sphere" className="flex items-center gap-2">
+                            <Mic className="h-5 w-5" />
+                            <span className="hidden sm:inline">Sound Sphere</span>
+                        </Link>
+                    </Button>
+                     <Button variant="ghost" asChild className="px-2">
+                        <Link href="/join-project" className="flex items-center gap-2">
+                            <Briefcase className="h-5 w-5" />
+                            <span className="hidden sm:inline">Join Project</span>
+                        </Link>
+                    </Button>
+                </nav>
 
-                    {user ? (
-                    <div className="flex items-center space-x-2">
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="relative h-9 w-9 rounded-full">
-                                    <Bell className="h-5 w-5" />
-                                    {notifications.length > 0 && (
-                                        <span className="absolute top-0 right-0 flex h-2 w-2">
-                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-                                            <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
-                                        </span>
-                                    )}
-                                    <span className="sr-only">View notifications</span>
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-80">
-                                <DropdownMenuLabel>Notifications</DropdownMenuLabel>
-                                <DropdownMenuSeparator />
-                                {notifications.length > 0 ? (
-                                    notifications.map(notification => (
-                                        <DropdownMenuItem key={notification.id} asChild className="cursor-pointer">
-                                            <Link href={notification.href} className="flex flex-col items-start gap-1 w-full">
-                                                <p className="text-sm leading-tight whitespace-normal">{notification.text}</p>
-                                                <p className="text-xs text-muted-foreground">{notification.time}</p>
-                                            </Link>
-                                        </DropdownMenuItem>
-                                    ))
-                                ) : (
-                                    <DropdownMenuItem disabled>
-                                        <p className="text-sm text-center w-full">No new notifications</p>
-                                    </DropdownMenuItem>
+                {user ? (
+                <div className="flex items-center space-x-2">
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="relative h-9 w-9 rounded-full">
+                                <Bell className="h-5 w-5" />
+                                {notifications.length > 0 && (
+                                    <span className="absolute top-0 right-0 flex h-2 w-2">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+                                    </span>
                                 )}
-                            </DropdownMenuContent>
-                        </DropdownMenu>
+                                <span className="sr-only">View notifications</span>
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-80">
+                            <DropdownMenuLabel>Notifications</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            {notifications.length > 0 ? (
+                                notifications.map(notification => (
+                                    <DropdownMenuItem key={notification.id} asChild className="cursor-pointer">
+                                        <Link href={notification.href} className="flex flex-col items-start gap-1 w-full">
+                                            <p className="text-sm leading-tight whitespace-normal">{notification.text}</p>
+                                            <p className="text-xs text-muted-foreground">{notification.time}</p>
+                                        </Link>
+                                    </DropdownMenuItem>
+                                ))
+                            ) : (
+                                <DropdownMenuItem disabled>
+                                    <p className="text-sm text-center w-full">No new notifications</p>
+                                </DropdownMenuItem>
+                            )}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
 
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" className="relative h-9 w-9 rounded-full">
-                                    <Avatar className="h-9 w-9">
-                                        <AvatarImage src={user.photoURL || ''} alt={user.displayName || 'User'} />
-                                        <AvatarFallback>{user.displayName?.split(' ').map(n => n[0]).join('').substring(0, 2) || user.email?.charAt(0).toUpperCase()}</AvatarFallback>
-                                    </Avatar>
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent className="w-56" align="end" forceMount>
-                                <DropdownMenuLabel className="font-normal">
-                                    <div className="flex flex-col space-y-1">
-                                        <p className="text-sm font-medium leading-none">{user.displayName}</p>
-                                        <p className="text-xs leading-none text-muted-foreground">{user.email}</p>
-                                    </div>
-                                </DropdownMenuLabel>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem asChild>
-                                    <Link href={`/profile/${user.uid}`}>
-                                        <UserIcon className="mr-2 h-4 w-4" />
-                                        <span>Profile</span>
-                                    </Link>
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={handleSignOut}>
-                                    <LogOut className="mr-2 h-4 w-4" />
-                                    <span>Log out</span>
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                    </div>
-                    ) : (
-                        <div className="flex items-center space-x-2">
-                            <Button variant="ghost" onClick={() => handleAuthDialogOpen('login')}>
-                                Login
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" className="relative h-9 w-9 rounded-full">
+                                <Avatar className="h-9 w-9">
+                                    <AvatarImage src={user.photoURL || ''} alt={user.displayName || 'User'} />
+                                    <AvatarFallback>{user.displayName?.split(' ').map(n => n[0]).join('').substring(0, 2) || user.email?.charAt(0).toUpperCase()}</AvatarFallback>
+                                </Avatar>
                             </Button>
-                            <Button onClick={() => handleAuthDialogOpen('signup')}>
-                                Sign Up
-                            </Button>
-                        </div>
-                    )}
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent className="w-56" align="end" forceMount>
+                            <DropdownMenuLabel className="font-normal">
+                                <div className="flex flex-col space-y-1">
+                                    <p className="text-sm font-medium leading-none">{user.displayName}</p>
+                                    <p className="text-xs leading-none text-muted-foreground">{user.email}</p>
+                                </div>
+                            </DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem asChild>
+                                <Link href={`/profile/${user.uid}`}>
+                                    <UserIcon className="mr-2 h-4 w-4" />
+                                    <span>Profile</span>
+                                </Link>
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={handleSignOut}>
+                                <LogOut className="mr-2 h-4 w-4" />
+                                <span>Log out</span>
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
                 </div>
+                ) : (
+                    <div className="flex items-center space-x-2">
+                        <Button variant="ghost" onClick={() => handleAuthDialogOpen('login')}>
+                            Login
+                        </Button>
+                        <Button onClick={() => handleAuthDialogOpen('signup')}>
+                            Sign Up
+                        </Button>
+                    </div>
+                )}
             </div>
-        </TooltipProvider>
+        </div>
       </header>
       <main className="flex-1">
         {/* Hero / About Us Section */}
         <section className="w-full py-12 md:py-24 lg:py-32">
           <div className="container px-4 md:px-6">
-            <div className="grid gap-6 lg:grid-cols-2 lg:gap-12 xl:gap-16">
-                 <div className="flex flex-col justify-center space-y-4">
+            <div className="grid gap-8 lg:grid-cols-2 lg:gap-12 xl:gap-16">
+                 <div className="flex flex-col justify-center space-y-4 text-center lg:text-left">
                     <div className="space-y-2">
-                        <h1 className="text-3xl font-bold tracking-tighter sm:text-4xl md:text-5xl lg:text-6xl/none font-headline">
+                        <h1 className="text-3xl font-bold tracking-tighter sm:text-4xl md:text-5xl font-headline">
                         Accelerating Innovation, Together
                         </h1>
                         <p className="max-w-[600px] text-muted-foreground md:text-xl">
@@ -402,7 +382,7 @@ export default function Home() {
                     alt="Team working in an office"
                     width={600}
                     height={400}
-                    className="mx-auto aspect-video overflow-hidden rounded-xl object-cover object-center sm:w-full"
+                    className="mx-auto aspect-[16/10] overflow-hidden rounded-xl object-cover object-center sm:w-full"
                     data-ai-hint="office team"
                 />
             </div>
@@ -561,7 +541,7 @@ export default function Home() {
 
       </main>
       <footer className="border-t">
-        <div className="container flex flex-col items-center justify-center gap-4 h-28 text-center md:h-20 md:flex-row md:justify-between">
+        <div className="container flex flex-col items-center justify-between gap-4 py-4 text-center md:h-20 md:flex-row md:py-0 px-4 md:px-6">
            <p className="text-sm text-muted-foreground">© {new Date().getFullYear()} Infinity Software. All Rights Reserved.</p>
            <Button asChild variant="secondary">
                 <Link href="mailto:contact@infinitysoftware.com">Email Us For Your Needs</Link>
@@ -570,6 +550,6 @@ export default function Home() {
       </footer>
     </div>
   );
+}
 
     
-
