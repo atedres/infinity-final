@@ -973,12 +973,12 @@ export default function SoundSpherePage() {
                             </DialogContent>
                         </Dialog>
 
-                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             {rooms.map((room) => (
                                 <Link
                                     href={user ? `/sound-sphere/${room.id}` : '#'}
                                     key={room.id}
-                                    className="block"
+                                    className="block group"
                                     onClick={(e) => {
                                         if (!user) {
                                             e.preventDefault();
@@ -986,26 +986,28 @@ export default function SoundSpherePage() {
                                         }
                                     }}
                                 >
-                                    <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
-                                        <CardContent className="p-4 flex items-start gap-4">
-                                            <div className="bg-primary/10 p-4 rounded-lg">
-                                                <Mic className="h-6 w-6 text-primary"/>
+                                    <Card className="hover:shadow-lg transition-shadow duration-300 h-full">
+                                        <CardContent className="p-6">
+                                            <div className="flex items-center gap-4 mb-3">
+                                                <div className="bg-primary/10 p-3 rounded-full">
+                                                    <Mic className="h-6 w-6 text-primary"/>
+                                                </div>
+                                                <div className="flex-1 space-y-1">
+                                                    <h4 className="font-semibold text-lg leading-tight group-hover:text-primary transition-colors">{room.title}</h4>
+                                                    <p className="text-sm text-muted-foreground break-words line-clamp-2">{room.description || `A conversation started by ${room.creatorName}`}</p>
+                                                </div>
                                             </div>
-                                            <div className="space-y-1 flex-1">
-                                                <h4 className="font-semibold text-lg">{room.title}</h4>
-                                                <p className="text-sm text-muted-foreground break-words">{room.description || `A conversation with ${room.creatorName}`}</p>
-                                                <div className="flex items-center gap-4 text-sm text-muted-foreground pt-1">
-                                                    <div className="flex items-center gap-1.5">
-                                                        <Users className="h-4 w-4" />
-                                                        <span>{room.participantsCount} listening</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-1.5">
-                                                        <Avatar className="h-5 w-5">
-                                                            <AvatarImage src={room.creatorAvatar} />
-                                                            <AvatarFallback>{room.creatorName?.[0]}</AvatarFallback>
-                                                        </Avatar>
-                                                        <span>{room.creatorName}</span>
-                                                    </div>
+                                            <div className="flex items-center gap-4 text-sm text-muted-foreground pt-3 border-t">
+                                                <div className="flex items-center gap-1.5">
+                                                    <Users className="h-4 w-4" />
+                                                    <span>{room.participantsCount} listening</span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5">
+                                                    <Avatar className="h-5 w-5">
+                                                        <AvatarImage src={room.creatorAvatar} />
+                                                        <AvatarFallback>{room.creatorName?.[0]}</AvatarFallback>
+                                                    </Avatar>
+                                                    <span>{room.creatorName}</span>
                                                 </div>
                                             </div>
                                         </CardContent>
@@ -1155,5 +1157,3 @@ export default function SoundSpherePage() {
         </SubpageLayout>
     );
 }
-
-    
