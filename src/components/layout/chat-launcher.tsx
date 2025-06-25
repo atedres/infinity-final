@@ -212,31 +212,26 @@ export function ChatLauncher() {
         const messagesRef = collection(db, "chats", selectedChat.id, "messages");
         
         try {
+            // Add the new message document
             await addDoc(messagesRef, {
                 text: newMessage,
                 senderId: currentUser.uid,
                 timestamp: serverTimestamp(),
             });
 
-            const chatSnap = await getDoc(chatDocRef);
-            if (!chatSnap.exists()) {
-                 await setDoc(chatDocRef, {
+            // Use set with merge to safely create/update the main chat document.
+            // This prevents errors if the document or 'unreadCounts' field doesn't exist yet.
+            await setDoc(chatDocRef, {
+                    lastMessage: newMessage,
+                    lastUpdate: serverTimestamp(),
                     participants: selectedChat.participants,
                     participantNames: selectedChat.participantNames,
-                    lastMessage: newMessage,
-                    lastUpdate: serverTimestamp(),
                     unreadCounts: {
-                        [currentUser.uid]: 0,
-                        [otherId]: 1
+                        [otherId]: increment(1),
+                        [currentUser.uid]: 0
                     }
-                });
-            } else {
-                 await updateDoc(chatDocRef, {
-                    lastMessage: newMessage,
-                    lastUpdate: serverTimestamp(),
-                    [`unreadCounts.${otherId}`]: increment(1),
-                });
-            }
+                }, { merge: true }
+            );
 
             setNewMessage('');
         } catch (error) {
@@ -244,22 +239,26 @@ export function ChatLauncher() {
             toast({ title: "Error", description: "Could not send message.", variant: "destructive" });
         }
     };
-
+    
     const handleSelectChat = async (chat: EnrichedChat) => {
         if (!currentUser || !db) return;
         
+        setSelectedChat(chat); // Select the chat immediately for better UX
+
+        // If the chat has unread messages, mark them as read in Firestore.
         if (chat.unreadCount > 0) {
             try {
                 const chatDocRef = doc(db, "chats", chat.id);
-                await updateDoc(chatDocRef, {
-                    [`unreadCounts.${currentUser.uid}`]: 0
-                });
+                 // Use set with merge to safely update the count, even if the field doesn't exist.
+                await setDoc(chatDocRef, {
+                    unreadCounts: {
+                        [currentUser.uid]: 0
+                    }
+                }, { merge: true });
             } catch (error) {
-                // Non-critical error, can be ignored if doc doesn't exist yet
-                 console.warn("Could not mark chat as read, may not exist yet", error);
+                console.warn("Could not mark chat as read", error);
             }
         }
-        setSelectedChat(chat);
     };
 
     
@@ -337,7 +336,7 @@ export function ChatLauncher() {
                                     onClick={() => handleSelectChat(chat)}
                                     className={cn(
                                         "w-full flex items-center gap-3 p-3 text-left hover:bg-muted border-b",
-                                        chat.unreadCount > 0 && "bg-blue-500/10 hover:bg-blue-500/20"
+                                        chat.unreadCount > 0 && "bg-accent/50 hover:bg-accent/80"
                                     )}
                                 >
                                     <Avatar>
