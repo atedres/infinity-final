@@ -3,17 +3,24 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, query, where, onSnapshot, orderBy, doc, addDoc, serverTimestamp, setDoc, getDoc, updateDoc, increment, writeBatch } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, doc, addDoc, serverTimestamp, setDoc, getDoc, updateDoc, increment, writeBatch, deleteDoc } from 'firebase/firestore';
+import Peer from 'simple-peer';
+import type { Instance as PeerInstance } from 'simple-peer';
+import 'webrtc-adapter';
+
 import { db, auth } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetFooter } from '@/components/ui/sheet';
+import { Dialog } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { MessageSquare, Send, ArrowLeft } from 'lucide-react';
+import { MessageSquare, Send, ArrowLeft, Phone, PhoneOff, Mic, MicOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { useNotificationSound } from '@/hooks/use-notification-sound';
+
 
 // Interfaces for our data structures
 interface Chat {
@@ -41,6 +48,31 @@ interface ChatMessage {
     timestamp: any;
 }
 
+interface IncomingCall {
+    fromId: string;
+    fromName: string;
+    fromAvatar: string;
+    chatId: string;
+    signal: string;
+}
+
+const iceServers = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+];
+
+const AudioPlayer = ({ stream }: { stream: MediaStream }) => {
+    const ref = useRef<HTMLAudioElement>(null);
+
+    useEffect(() => {
+        if (ref.current) {
+            ref.current.srcObject = stream;
+        }
+    }, [stream]);
+
+    return <audio ref={ref} autoPlay playsInline />;
+};
+
 // A new self-contained component for the chat launcher
 export function ChatLauncher() {
     const { toast } = useToast();
@@ -59,6 +91,16 @@ export function ChatLauncher() {
     conversationsRef.current = conversations;
     const selectedChatRef = useRef(selectedChat);
     selectedChatRef.current = selectedChat;
+    
+    // Call State
+    const [callState, setCallState] = useState<'idle' | 'calling' | 'receiving' | 'active'>('idle');
+    const callStateRef = useRef(callState);
+    callStateRef.current = callState;
+    const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
+    const localStreamRef = useRef<MediaStream | null>(null);
+    const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+    const [isMuted, setIsMuted] = useState(false);
+    const peerRef = useRef<PeerInstance | null>(null);
 
 
     // Listen for auth changes
@@ -74,10 +116,53 @@ export function ChatLauncher() {
                 setIsOpen(false);
                 setTotalUnread(0);
                 isInitialChatsLoad.current = true;
+                endCall(false);
             }
         });
         return () => unsubscribe();
     }, []);
+    
+    // Global listener for P2P signals
+    useEffect(() => {
+        if (!currentUser || !db) return;
+        
+        const signalsQuery = query(collection(db, "p2p_signals"), where("to", "==", currentUser.uid));
+        
+        const unsubscribe = onSnapshot(signalsQuery, (snapshot) => {
+            snapshot.docChanges().forEach(async (change) => {
+                if (change.type === 'added') {
+                    const data = change.doc.data();
+                    const signal = JSON.parse(data.signal);
+                    
+                    if (signal.type === 'offer' && callStateRef.current === 'idle') {
+                        setIncomingCall({
+                           fromId: data.from,
+                           fromName: data.fromName,
+                           fromAvatar: data.fromAvatar,
+                           chatId: data.chatId,
+                           signal: data.signal,
+                        });
+                        setCallState('receiving');
+                    } else if (signal.type === 'answer' && callStateRef.current === 'calling') {
+                        peerRef.current?.signal(signal);
+                    } else if (signal.type === 'end-call') {
+                         if (callStateRef.current !== 'idle') {
+                            toast({ title: 'Call Ended' });
+                            endCall(false);
+                         }
+                    } else if (peerRef.current && !peerRef.current.destroyed) {
+                        peerRef.current?.signal(signal);
+                    }
+                    
+                    // Delete signal doc after processing
+                    await deleteDoc(change.doc.ref);
+                }
+            });
+        });
+        
+        return () => unsubscribe();
+    }, [currentUser]);
+
 
     // Fetch and enrich conversations when user is logged in
     useEffect(() => {
@@ -232,7 +317,134 @@ export function ChatLauncher() {
             window.removeEventListener('open-chat', handleOpenChat);
         };
     }, [currentUser, db, conversations, toast]);
+    
+    const sendSignal = async (to: string, chatId: string, signal: any) => {
+        if (!db || !currentUser) return;
+        await addDoc(collection(db, "p2p_signals"), {
+            from: currentUser.uid,
+            fromName: currentUser.displayName || 'Anonymous',
+            fromAvatar: currentUser.photoURL || '',
+            to,
+            chatId,
+            signal: JSON.stringify(signal),
+        });
+    };
 
+    const endCall = async (notifyPeer = true) => {
+        if (notifyPeer && peerRef.current?.destroyed === false && selectedChat && currentUser) {
+            await sendSignal(selectedChat.otherParticipant.id, selectedChat.id, { type: 'end-call' });
+        }
+        
+        peerRef.current?.destroy();
+        peerRef.current = null;
+        localStreamRef.current?.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
+        
+        setRemoteStream(null);
+        setCallState('idle');
+        setIsMuted(false);
+        setIncomingCall(null);
+    };
+
+    const startCall = async (chat: EnrichedChat) => {
+        if (!currentUser || !db) return;
+        if (callState !== 'idle') {
+            toast({ title: "Cannot start call", description: "You are already in a call or one is incoming.", variant: "destructive" });
+            return;
+        }
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            localStreamRef.current = stream;
+            setCallState('calling');
+            
+            const peer = new Peer({
+                initiator: true,
+                trickle: false,
+                stream: stream,
+                config: { iceServers }
+            });
+            peerRef.current = peer;
+
+            peer.on('signal', (signal) => {
+                sendSignal(chat.otherParticipant.id, chat.id, signal);
+            });
+            peer.on('stream', (remoteStream) => {
+                setRemoteStream(remoteStream);
+                setCallState('active');
+            });
+            peer.on('close', () => endCall(false));
+            peer.on('error', (err) => {
+                console.error('Peer error:', err);
+                toast({ title: "Call Error", description: "An error occurred during the call.", variant: "destructive" });
+                endCall(false);
+            });
+        } catch (error) {
+            console.error("Error getting user media:", error);
+            toast({ title: "Microphone Error", description: "Could not access your microphone. Please check permissions.", variant: "destructive" });
+            setCallState('idle');
+        }
+    };
+    
+    const answerCall = async () => {
+        if (!currentUser || !db || !incomingCall) return;
+        
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            localStreamRef.current = stream;
+            
+            const peer = new Peer({
+                initiator: false,
+                trickle: false,
+                stream: stream,
+                config: { iceServers }
+            });
+            peerRef.current = peer;
+            
+            const chatWithCaller = conversations.find(c => c.id === incomingCall.chatId);
+            setSelectedChat(chatWithCaller || null);
+            setCallState('active');
+            
+            peer.on('signal', (signal) => {
+                sendSignal(incomingCall.fromId, incomingCall.chatId, signal);
+            });
+            peer.on('stream', (remoteStream) => {
+                setRemoteStream(remoteStream);
+            });
+            peer.on('close', () => endCall(false));
+            peer.on('error', (err) => {
+                 console.error('Peer error:', err);
+                 toast({ title: "Call Error", description: "An error occurred during the call.", variant: "destructive" });
+                 endCall(false);
+            });
+            
+            peer.signal(JSON.parse(incomingCall.signal));
+            setIncomingCall(null);
+            
+        } catch (error) {
+            console.error("Error answering call:", error);
+            toast({ title: "Microphone Error", description: "Could not access your microphone.", variant: "destructive" });
+            endCall(false);
+        }
+    };
+
+    const declineCall = async () => {
+        if (incomingCall) {
+            await sendSignal(incomingCall.fromId, incomingCall.chatId, { type: 'end-call' });
+        }
+        setIncomingCall(null);
+        setCallState('idle');
+    };
+
+    const toggleMute = () => {
+        if (localStreamRef.current) {
+            const audioTrack = localStreamRef.current.getAudioTracks()[0];
+            if (audioTrack) {
+                audioTrack.enabled = !audioTrack.enabled;
+                setIsMuted(!audioTrack.enabled);
+            }
+        }
+    };
 
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -245,15 +457,12 @@ export function ChatLauncher() {
         const messagesRef = collection(db, "chats", selectedChat.id, "messages");
         
         try {
-            // Add the new message document
             await addDoc(messagesRef, {
                 text: newMessage,
                 senderId: currentUser.uid,
                 timestamp: serverTimestamp(),
             });
 
-            // Use set with merge to safely create/update the main chat document.
-            // This prevents errors if the document or 'unreadCounts' field doesn't exist yet.
             await setDoc(chatDocRef, {
                     lastMessage: newMessage,
                     lastUpdate: serverTimestamp(),
@@ -276,13 +485,11 @@ export function ChatLauncher() {
     const handleSelectChat = async (chat: EnrichedChat) => {
         if (!currentUser || !db) return;
         
-        setSelectedChat(chat); // Select the chat immediately for better UX
+        setSelectedChat(chat);
 
-        // If the chat has unread messages, mark them as read in Firestore.
         if (chat.unreadCount > 0) {
             try {
                 const chatDocRef = doc(db, "chats", chat.id);
-                 // Use set with merge to safely update the count, even if the field doesn't exist.
                 await setDoc(chatDocRef, {
                     unreadCounts: {
                         [currentUser.uid]: 0
@@ -302,100 +509,175 @@ export function ChatLauncher() {
         }
     }, [isOpen]);
 
-    // Don't render anything if the user is not logged in
     if (!currentUser) return null;
 
-    return (
-        <Sheet open={isOpen} onOpenChange={setIsOpen}>
-            <SheetTrigger asChild>
-                <Button variant="outline" size="icon" className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg z-50 bg-background hover:bg-accent">
-                    <MessageSquare className="h-7 w-7 text-primary" />
-                    {totalUnread > 0 && (
-                        <span className="absolute -top-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-destructive text-xs font-bold text-destructive-foreground">
-                            {totalUnread > 9 ? '9+' : totalUnread}
-                        </span>
-                    )}
-                </Button>
-            </SheetTrigger>
-            <SheetContent className="flex flex-col p-0" side="right">
-                <SheetHeader className="p-4 pb-2 border-b">
-                    {selectedChat ? (
-                        <div className="flex items-center gap-2">
-                            <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setSelectedChat(null)}>
-                                <ArrowLeft className="h-5 w-5" />
-                            </Button>
-                            <Avatar className="h-9 w-9">
-                                <AvatarImage src={selectedChat.otherParticipant.avatar} />
-                                <AvatarFallback>{selectedChat.otherParticipant.name?.[0]}</AvatarFallback>
-                            </Avatar>
-                            <SheetTitle>{selectedChat.otherParticipant.name}</SheetTitle>
-                        </div>
-                    ) : (
-                        <SheetTitle>Conversations</SheetTitle>
-                    )}
-                </SheetHeader>
+    const CallDialog = () => {
+        const otherParticipant = selectedChat?.otherParticipant;
+        const caller = incomingCall;
 
-                {selectedChat ? (
-                    // Message View
-                    <>
-                        <ScrollArea className="flex-1 px-4">
-                            <div className="space-y-4 py-4">
-                                {messages.map(message => (
-                                    <div key={message.id} className={cn("flex w-max max-w-[75%] flex-col gap-1 rounded-lg px-3 py-2 text-sm",
-                                        message.senderId === currentUser?.uid ? "ml-auto bg-primary text-primary-foreground" : "bg-muted"
-                                    )}>
-                                        {message.text}
+        let name, avatar;
+        if (callState === 'active' || callState === 'calling') {
+            name = otherParticipant?.name;
+            avatar = otherParticipant?.avatar;
+        } else if (callState === 'receiving') {
+            name = caller?.fromName;
+            avatar = caller?.fromAvatar;
+        }
+        
+        return (
+            <Dialog open={callState === 'active' || callState === 'calling'}>
+                <DialogContent className="sm:max-w-xs" onInteractOutside={(e) => e.preventDefault()}>
+                    <div className="flex flex-col items-center justify-center gap-4 py-8">
+                        <Avatar className="h-24 w-24 border-2 border-primary">
+                            <AvatarImage src={avatar} alt={name}/>
+                            <AvatarFallback className="text-3xl">{name?.[0]}</AvatarFallback>
+                        </Avatar>
+                        <div className="text-center">
+                            <p className="text-xl font-semibold">{name}</p>
+                            <p className="text-sm text-muted-foreground">
+                                {callState === 'calling' && 'Calling...'}
+                                {callState === 'active' && 'Connected'}
+                            </p>
+                        </div>
+                        <div className="flex items-center gap-4 mt-8">
+                             {callState === 'active' && (
+                                <Button variant="outline" size="icon" className="h-14 w-14 rounded-full" onClick={toggleMute}>
+                                    {isMuted ? <MicOff className="h-6 w-6"/> : <Mic className="h-6 w-6"/>}
+                                </Button>
+                            )}
+                            <Button variant="destructive" size="icon" className="h-14 w-14 rounded-full" onClick={() => endCall()}>
+                                <PhoneOff className="h-6 w-6"/>
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+        );
+    };
+
+    return (
+        <>
+            {remoteStream && <AudioPlayer stream={remoteStream} />}
+            <CallDialog />
+             <AlertDialog open={callState === 'receiving'}>
+                <AlertDialogContent>
+                    <AlertDialogHeader className="items-center">
+                         <Avatar className="h-20 w-20">
+                            <AvatarImage src={incomingCall?.fromAvatar} alt={incomingCall?.fromName}/>
+                            <AvatarFallback className="text-2xl">{incomingCall?.fromName?.[0]}</AvatarFallback>
+                        </Avatar>
+                        <AlertDialogTitle>{incomingCall?.fromName} is calling</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Do you want to accept the call?
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter className="justify-center">
+                        <AlertDialogCancel asChild>
+                            <Button variant="destructive" size="lg" className="rounded-full" onClick={declineCall}>Decline</Button>
+                        </AlertDialogCancel>
+                        <AlertDialogAction asChild>
+                            <Button variant="default" size="lg" className="rounded-full bg-green-600 hover:bg-green-700" onClick={answerCall}>Accept</Button>
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            <Sheet open={isOpen} onOpenChange={setIsOpen}>
+                <SheetTrigger asChild>
+                    <Button variant="outline" size="icon" className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg z-50 bg-background hover:bg-accent">
+                        <MessageSquare className="h-7 w-7 text-primary" />
+                        {totalUnread > 0 && (
+                            <span className="absolute -top-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-destructive text-xs font-bold text-destructive-foreground">
+                                {totalUnread > 9 ? '9+' : totalUnread}
+                            </span>
+                        )}
+                    </Button>
+                </SheetTrigger>
+                <SheetContent className="flex flex-col p-0" side="right">
+                    <SheetHeader className="p-4 pb-2 border-b">
+                        {selectedChat ? (
+                            <div className="flex items-center gap-2">
+                                <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setSelectedChat(null)}>
+                                    <ArrowLeft className="h-5 w-5" />
+                                </Button>
+                                <Avatar className="h-9 w-9">
+                                    <AvatarImage src={selectedChat.otherParticipant.avatar} />
+                                    <AvatarFallback>{selectedChat.otherParticipant.name?.[0]}</AvatarFallback>
+                                </Avatar>
+                                <SheetTitle>{selectedChat.otherParticipant.name}</SheetTitle>
+                                <Button variant="ghost" size="icon" className="ml-auto" onClick={() => startCall(selectedChat)}>
+                                    <Phone className="h-5 w-5"/>
+                                </Button>
+                            </div>
+                        ) : (
+                            <SheetTitle>Conversations</SheetTitle>
+                        )}
+                    </SheetHeader>
+
+                    {selectedChat ? (
+                        // Message View
+                        <>
+                            <ScrollArea className="flex-1 px-4">
+                                <div className="space-y-4 py-4">
+                                    {messages.map(message => (
+                                        <div key={message.id} className={cn("flex w-max max-w-[75%] flex-col gap-1 rounded-lg px-3 py-2 text-sm",
+                                            message.senderId === currentUser?.uid ? "ml-auto bg-primary text-primary-foreground" : "bg-muted"
+                                        )}>
+                                            {message.text}
+                                        </div>
+                                    ))}
+                                    <div ref={messagesEndRef} />
+                                </div>
+                            </ScrollArea>
+                            <SheetFooter className="p-4 border-t">
+                                <form onSubmit={handleSendMessage} className="w-full flex gap-2">
+                                    <Input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Type a message..." autoComplete="off"/>
+                                    <Button type="submit" size="icon" disabled={!newMessage.trim()}>
+                                        <Send className="h-4 w-4" />
+                                    </Button>
+                                </form>
+                            </SheetFooter>
+                        </>
+                    ) : (
+                        // Conversation List View
+                        <ScrollArea className="flex-1">
+                            <div className="py-2">
+                                {conversations.length > 0 ? conversations.map(chat => (
+                                    <button 
+                                        key={chat.id} 
+                                        onClick={() => handleSelectChat(chat)}
+                                        className={cn(
+                                            "w-full flex items-center gap-3 p-3 text-left hover:bg-muted border-b",
+                                            chat.unreadCount > 0 && "bg-accent/50 hover:bg-accent/80"
+                                        )}
+                                    >
+                                        <Avatar>
+                                            <AvatarImage src={chat.otherParticipant.avatar} />
+                                            <AvatarFallback>{chat.otherParticipant.name?.[0]}</AvatarFallback>
+                                        </Avatar>
+                                        <div className="flex-1 truncate">
+                                            <p className="font-semibold">{chat.otherParticipant.name}</p>
+                                            <p className="text-sm text-muted-foreground truncate">{chat.lastMessage}</p>
+                                        </div>
+                                        {chat.unreadCount > 0 && (
+                                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
+                                                {chat.unreadCount}
+                                            </span>
+                                        )}
+                                    </button>
+                                )) : (
+                                    <div className="text-center text-muted-foreground p-8">
+                                        <p>No conversations yet.</p>
+                                        <p className="text-sm">Start a chat from a user's profile.</p>
                                     </div>
-                                ))}
-                                <div ref={messagesEndRef} />
+                                )}
                             </div>
                         </ScrollArea>
-                        <SheetFooter className="p-4 border-t">
-                            <form onSubmit={handleSendMessage} className="w-full flex gap-2">
-                                <Input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Type a message..." autoComplete="off"/>
-                                <Button type="submit" size="icon" disabled={!newMessage.trim()}>
-                                    <Send className="h-4 w-4" />
-                                </Button>
-                            </form>
-                        </SheetFooter>
-                    </>
-                ) : (
-                    // Conversation List View
-                    <ScrollArea className="flex-1">
-                        <div className="py-2">
-                            {conversations.length > 0 ? conversations.map(chat => (
-                                <button 
-                                    key={chat.id} 
-                                    onClick={() => handleSelectChat(chat)}
-                                    className={cn(
-                                        "w-full flex items-center gap-3 p-3 text-left hover:bg-muted border-b",
-                                        chat.unreadCount > 0 && "bg-accent/50 hover:bg-accent/80"
-                                    )}
-                                >
-                                    <Avatar>
-                                        <AvatarImage src={chat.otherParticipant.avatar} />
-                                        <AvatarFallback>{chat.otherParticipant.name?.[0]}</AvatarFallback>
-                                    </Avatar>
-                                    <div className="flex-1 truncate">
-                                        <p className="font-semibold">{chat.otherParticipant.name}</p>
-                                        <p className="text-sm text-muted-foreground truncate">{chat.lastMessage}</p>
-                                    </div>
-                                    {chat.unreadCount > 0 && (
-                                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
-                                            {chat.unreadCount}
-                                        </span>
-                                    )}
-                                </button>
-                            )) : (
-                                <div className="text-center text-muted-foreground p-8">
-                                    <p>No conversations yet.</p>
-                                    <p className="text-sm">Start a chat from a user's profile.</p>
-                                </div>
-                            )}
-                        </div>
-                    </ScrollArea>
-                )}
-            </SheetContent>
-        </Sheet>
+                    )}
+                </SheetContent>
+            </Sheet>
+        </>
     );
 }
+
+    
