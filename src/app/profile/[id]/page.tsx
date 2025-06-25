@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useRef, type ChangeEvent } from 'react';
@@ -19,9 +20,9 @@ import { Button } from "@/components/ui/button";
 import { useToast } from '@/hooks/use-toast';
 import { db, auth, storage } from '@/lib/firebase';
 import { onAuthStateChanged, User, updateProfile } from 'firebase/auth';
-import { doc, getDoc, collection, getDocs, setDoc, deleteDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, getDocs, setDoc, deleteDoc, serverTimestamp, updateDoc, query, where, orderBy } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { UserPlus, UserCheck, Edit, Camera } from 'lucide-react';
+import { UserPlus, UserCheck, Edit, Camera, Heart, MessageCircle } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -91,6 +92,19 @@ interface ProfileUser {
     bio?: string;
 }
 
+interface Post {
+    id: string;
+    authorId: string;
+    authorName: string;
+    authorHandle: string;
+    authorAvatar: string;
+    content: string;
+    likes: number;
+    comments: number;
+    createdAt: any;
+}
+
+
 export default function ProfilePage() {
     const { toast } = useToast();
     const router = useRouter();
@@ -102,6 +116,7 @@ export default function ProfilePage() {
 
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [profileUser, setProfileUser] = useState<ProfileUser | null>(null);
+    const [posts, setPosts] = useState<Post[]>([]);
     const [followerCount, setFollowerCount] = useState(0);
     const [followingCount, setFollowingCount] = useState(0);
     const [isFollowing, setIsFollowing] = useState(false);
@@ -170,6 +185,13 @@ export default function ProfilePage() {
                 } else {
                     setIsOwnProfile(false);
                 }
+                
+                // Fetch user's posts
+                const postsQuery = query(collection(db, "posts"), where("authorId", "==", userId), orderBy("createdAt", "desc"));
+                const postsSnapshot = await getDocs(postsQuery);
+                const userPosts = postsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Post[];
+                setPosts(userPosts);
+
 
             } catch (error) {
                 console.error("Error fetching profile data:", error);
@@ -522,8 +544,23 @@ export default function ProfilePage() {
                             <CardTitle>Posts</CardTitle>
                             <CardDescription>Latest posts from {profileUser.firstName}.</CardDescription>
                         </CardHeader>
-                        <CardContent>
-                           <p className="text-muted-foreground text-center py-8">Post history will be shown here.</p>
+                        <CardContent className="space-y-4">
+                           {posts.length > 0 ? posts.map(post => (
+                               <Card key={post.id}>
+                                   <CardContent className="p-4 space-y-3">
+                                       <p className="text-foreground/90">{post.content}</p>
+                                       <div className="flex items-center justify-between text-sm text-muted-foreground border-t pt-3">
+                                            <div className="flex items-center gap-4">
+                                                <span className="flex items-center gap-1"><Heart className="h-4 w-4"/> {post.likes}</span>
+                                                <span className="flex items-center gap-1"><MessageCircle className="h-4 w-4"/> {post.comments}</span>
+                                            </div>
+                                           <span>{post.createdAt ? new Date(post.createdAt.toDate()).toLocaleDateString() : ''}</span>
+                                       </div>
+                                   </CardContent>
+                               </Card>
+                           )) : (
+                            <p className="text-muted-foreground text-center py-8">This user hasn't posted anything yet.</p>
+                           )}
                         </CardContent>
                     </Card>
                 </div>
