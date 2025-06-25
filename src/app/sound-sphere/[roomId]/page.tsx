@@ -275,10 +275,14 @@ export default function AudioRoomPage() {
                     if (participant.id !== myId && !peersRef.current[participant.id]) {
                         // Create a new peer connection
                          try {
+                            if (!localStreamRef.current) {
+                                console.warn("[Peer Creation] Skipping peer creation: local stream not available.");
+                                continue;
+                            }
                             const peer = new Peer({
                                 initiator: myId > participant.id,
                                 trickle: false,
-                                stream: localStreamRef.current!,
+                                stream: localStreamRef.current,
                                 config: { iceServers }
                             });
                             
