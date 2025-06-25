@@ -68,6 +68,9 @@ const iceServers = [
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
     { urls: 'stun:stun.services.mozilla.com' },
+    { urls: "stun:stun.ekiga.net" },
+    { urls: "stun:stun.ideasip.com" },
+    { urls: "stun:stun.voiparound.com" },
 ];
 
 export default function AudioRoomPage() {
@@ -394,8 +397,15 @@ export default function AudioRoomPage() {
 
         setupRoom();
 
+        const handleBeforeUnload = () => {
+            cleanup();
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+
         // Master cleanup function when component unmounts or dependencies change
         return () => {
+            window.removeEventListener('beforeunload', handleBeforeUnload);
             cleanup();
         };
 

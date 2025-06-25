@@ -63,6 +63,9 @@ const iceServers = [
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
     { urls: 'stun:stun.services.mozilla.com' },
+    { urls: "stun:stun.ekiga.net" },
+    { urls: "stun:stun.ideasip.com" },
+    { urls: "stun:stun.voiparound.com" },
 ];
 
 const AudioPlayer = ({ stream }: { stream: MediaStream }) => {
@@ -125,7 +128,19 @@ export function ChatLauncher() {
                 endCall(false);
             }
         });
-        return () => unsubscribe();
+
+        const handleBeforeUnload = () => {
+            if (callStateRef.current !== 'idle') {
+                endCall(false);
+            }
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+
+        return () => {
+            unsubscribe();
+            window.removeEventListener('beforeunload', handleBeforeUnload);
+        };
     }, []);
 
     // Call sound effect
