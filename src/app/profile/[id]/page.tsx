@@ -426,14 +426,18 @@ export default function ProfilePage() {
                             <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
                                 <DialogTrigger asChild>
                                     <Avatar className="h-24 w-24 border-2 border-primary cursor-pointer hover:opacity-90 transition-opacity">
-                                        <AvatarImage src={profileUser.photoURL || `https://placehold.co/96x96.png`} data-ai-hint="person portrait"/>
+                                        <AvatarImage src={profileUser.photoURL || `https://placehold.co/96x96.png`} alt={displayName} data-ai-hint="person portrait"/>
                                         <AvatarFallback className="text-3xl">{profileUser.firstName?.[0]}{profileUser.lastName?.[0]}</AvatarFallback>
                                     </Avatar>
                                 </DialogTrigger>
                                 <DialogContent className="max-w-md p-0 bg-transparent border-none shadow-none">
+                                     <DialogHeader className="sr-only">
+                                        <DialogTitle>{`${displayName}'s profile picture`}</DialogTitle>
+                                        <DialogDescription>A larger view of the user's profile picture.</DialogDescription>
+                                     </DialogHeader>
                                      <Image
                                         src={profileUser.photoURL || `https://placehold.co/512x512.png`}
-                                        alt="Profile Picture"
+                                        alt={`${displayName}'s profile picture`}
                                         width={512}
                                         height={512}
                                         className="rounded-lg object-cover aspect-square"
