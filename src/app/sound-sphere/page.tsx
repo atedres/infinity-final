@@ -1062,6 +1062,10 @@ export default function SoundSpherePage() {
             {/* Dialog for Viewing Image */}
             <Dialog open={!!viewingImage} onOpenChange={() => setViewingImage(null)}>
                 <DialogContent className="max-w-3xl p-0 bg-transparent border-none shadow-none">
+                    <DialogHeader className="sr-only">
+                        <DialogTitle>View Image</DialogTitle>
+                        <DialogDescription>Full-screen view of the post image.</DialogDescription>
+                    </DialogHeader>
                     <Image src={viewingImage || ''} alt="Full screen post image" width={1200} height={800} className="w-full h-auto object-contain rounded-lg"/>
                 </DialogContent>
             </Dialog>
