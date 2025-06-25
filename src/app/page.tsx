@@ -16,6 +16,12 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { HeaderActions } from '@/components/layout/header-actions';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 
 const features = [
@@ -83,6 +89,7 @@ const stats = [
 export default function Home() {
   return (
     <div className="flex min-h-screen flex-col">
+       <TooltipProvider>
       <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-14 max-w-screen-2xl items-center px-4 md:px-6">
             <Link href="/" className="mr-6 flex items-center space-x-2">
@@ -93,23 +100,38 @@ export default function Home() {
             </Link>
             <div className="flex flex-1 items-center justify-end space-x-2 md:space-x-4">
                  <nav className="flex items-center gap-1 md:gap-2">
-                    <Button variant="ghost" asChild className="px-2">
-                        <Link href="/sound-sphere" className="flex items-center gap-2">
-                            <Mic className="h-5 w-5" />
-                            <span className="hidden sm:inline">Sound Sphere</span>
-                        </Link>
-                    </Button>
-                     <Button variant="ghost" asChild className="px-2">
-                        <Link href="/join-project" className="flex items-center gap-2">
-                            <Briefcase className="h-5 w-5" />
-                            <span className="hidden sm:inline">Join Project</span>
-                        </Link>
-                    </Button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button variant="ghost" asChild className="px-2">
+                                <Link href="/sound-sphere" className="flex items-center gap-2">
+                                    <Mic className="h-5 w-5" />
+                                    <span className="hidden sm:inline">Sound Sphere</span>
+                                </Link>
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                            <p>Sound Sphere</p>
+                        </TooltipContent>
+                    </Tooltip>
+                     <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button variant="ghost" asChild className="px-2">
+                                <Link href="/join-project" className="flex items-center gap-2">
+                                    <Briefcase className="h-5 w-5" />
+                                     <span className="hidden sm:inline">Join Project</span>
+                                </Link>
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                           <p>Join a Project</p>
+                        </TooltipContent>
+                    </Tooltip>
                 </nav>
                 <HeaderActions />
             </div>
         </div>
       </header>
+      </TooltipProvider>
       <main className="flex-1">
         {/* Hero / About Us Section */}
         <section className="w-full py-12 md:py-24 lg:py-32">
@@ -229,5 +251,3 @@ export default function Home() {
     </div>
   );
 }
-
-    

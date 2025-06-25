@@ -29,16 +29,23 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, User, signInWithPopup, updateProfile } from "firebase/auth";
-import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
+import { doc, setDoc, getDoc, serverTimestamp, collection, query, where, onSnapshot, orderBy, writeBatch } from "firebase/firestore";
 import { auth, db, googleProvider } from "@/lib/firebase";
+import { formatDistanceToNow } from 'date-fns';
 
 
-// Mock data for notifications UI
-const mockNotifications = [
-    { id: 1, text: "John Smith started following you.", href: "#", time: "5 minutes ago" },
-    { id: 2, text: "Your post 'My first day with Next.js' received a new comment.", href: "#", time: "1 hour ago" },
-    { id: 3, text: "Jane Doe joined the 'Tech Startup Mixer' audio room.", href: "#", time: "3 hours ago" },
-];
+interface Notification {
+  id: string;
+  actorName: string;
+  type: 'follow' | 'like' | 'comment';
+  entityId: string; // The ID of the post, user, etc.
+  read: boolean;
+  createdAt: any; // Keep it as Firestore timestamp
+  // These will be constructed
+  text: string;
+  href: string;
+  time: string;
+}
 
 
 export function HeaderActions() {
@@ -51,7 +58,8 @@ export function HeaderActions() {
     const [lastName, setLastName] = useState('');
     const [role, setRole] = useState('');
     const [isAuthDialogOpen, setIsAuthDialogOpen] = useState(false);
-    const [notifications, setNotifications] = useState(mockNotifications);
+    const [notifications, setNotifications] = useState<Notification[]>([]);
+    const [hasUnread, setHasUnread] = useState(false);
 
     useEffect(() => {
         if (!auth) return;
@@ -60,6 +68,74 @@ export function HeaderActions() {
         });
         return () => unsubscribe();
     }, []);
+
+    useEffect(() => {
+        if (!user || !db) {
+            setNotifications([]);
+            return;
+        }
+        
+        const q = query(collection(db, "notifications"), where("recipientId", "==", user.uid), orderBy("createdAt", "desc"));
+        
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const fetchedNotifications = snapshot.docs.map(doc => {
+                const data = doc.data();
+                const id = doc.id;
+                const createdAt = data.createdAt?.toDate();
+                
+                let text = '';
+                let href = '#';
+                
+                switch (data.type) {
+                    case 'like':
+                        text = `${data.actorName} liked your post.`;
+                        href = `/sound-sphere#post-${data.entityId}`;
+                        break;
+                    case 'comment':
+                        text = `${data.actorName} commented on your post.`;
+                        href = `/sound-sphere#post-${data.entityId}`;
+                        break;
+                    case 'follow':
+                        text = `${data.actorName} started following you.`;
+                        href = `/profile/${data.actorId}`;
+                        break;
+                    default:
+                        text = 'You have a new notification.';
+                }
+                
+                return {
+                    id,
+                    ...data,
+                    text,
+                    href,
+                    time: createdAt ? formatDistanceToNow(createdAt, { addSuffix: true }) : 'just now'
+                } as Notification;
+            });
+            
+            setNotifications(fetchedNotifications);
+            setHasUnread(fetchedNotifications.some(n => !n.read));
+        });
+
+        return () => unsubscribe();
+    }, [user]);
+
+    const handleOpenNotifications = async (open: boolean) => {
+        if (open && hasUnread && db && user) {
+            const unreadNotifsQuery = query(
+                collection(db, "notifications"),
+                where("recipientId", "==", user.uid),
+                where("read", "==", false)
+            );
+            const unreadSnapshot = await getDocs(unreadNotifsQuery);
+            const batch = writeBatch(db);
+            unreadSnapshot.docs.forEach(doc => {
+                batch.update(doc.ref, { read: true });
+            });
+            await batch.commit();
+            setHasUnread(false);
+        }
+    };
+
 
     const handleAuthDialogOpen = (action: 'login' | 'signup') => {
         setAuthAction(action);
@@ -196,11 +272,11 @@ export function HeaderActions() {
             <div className="flex items-center space-x-2">
                 {user ? (
                 <div className="flex items-center space-x-2">
-                    <DropdownMenu>
+                    <DropdownMenu onOpenChange={handleOpenNotifications}>
                         <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="icon" className="relative h-9 w-9 rounded-full">
                                 <Bell className="h-5 w-5" />
-                                {notifications.length > 0 && (
+                                {hasUnread && (
                                     <span className="absolute top-0 right-0 flex h-2 w-2">
                                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
                                         <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
@@ -223,8 +299,7 @@ export function HeaderActions() {
                                 ))
                             ) : (
                                 <DropdownMenuItem disabled>
-                                    <p className="text-sm text-center w-full">No new notifications</p>
-
+                                    <p className="text-sm text-center w-full p-4">No new notifications</p>
                                 </DropdownMenuItem>
                             )}
                         </DropdownMenuContent>
@@ -343,5 +418,3 @@ export function HeaderActions() {
         </>
     )
 }
-
-    

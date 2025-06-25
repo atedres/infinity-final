@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect } from 'react';
@@ -9,7 +10,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Mic, Users, MessageCircle, Heart, Share2, PlusCircle, UserPlus } from "lucide-react";
+import { Mic, Users, MessageCircle, Heart, Share2, PlusCircle, UserPlus, Send, Newspaper, Radio } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -18,6 +19,8 @@ import { useToast } from '@/hooks/use-toast';
 import { db, auth } from '@/lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, addDoc, getDocs, serverTimestamp, query, orderBy, where, doc, setDoc, deleteDoc, getDoc, updateDoc, increment } from 'firebase/firestore';
+import { formatDistanceToNow } from 'date-fns';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 // Types
 interface Post {
@@ -40,6 +43,16 @@ interface Room {
     isPublic: boolean;
 }
 
+interface Comment {
+    id: string;
+    authorId: string;
+    authorName: string;
+    authorAvatar: string;
+    text: string;
+    createdAt: any;
+}
+
+
 export default function SoundSpherePage() {
     const { toast } = useToast();
     const router = useRouter();
@@ -49,6 +62,11 @@ export default function SoundSpherePage() {
     const [posts, setPosts] = useState<Post[]>([]);
     const [newPostContent, setNewPostContent] = useState('');
     const [followingIds, setFollowingIds] = useState<string[]>([]);
+    const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
+    const [commentingOn, setCommentingOn] = useState<string | null>(null);
+    const [commentContent, setCommentContent] = useState('');
+    const [postComments, setPostComments] = useState<Comment[]>([]);
+
 
     // Rooms State
     const [rooms, setRooms] = useState<Room[]>([]);
@@ -63,7 +81,7 @@ export default function SoundSpherePage() {
         const unsubscribe = onAuthStateChanged(auth, currentUser => {
             setUser(currentUser);
             if (currentUser) {
-                fetchPosts();
+                fetchPosts(currentUser.uid);
                 fetchRooms();
                 fetchFollowing(currentUser.uid);
             } else {
@@ -75,13 +93,30 @@ export default function SoundSpherePage() {
         return () => unsubscribe();
     }, []);
 
-    const fetchPosts = async () => {
+    const fetchPosts = async (currentUserId?: string) => {
         if (!db) return;
         const q = query(collection(db, "posts"), orderBy("createdAt", "desc"));
         const querySnapshot = await getDocs(q);
         const postsList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Post));
         setPosts(postsList);
+        
+        if(currentUserId) {
+            fetchLikesForPosts(postsList, currentUserId);
+        }
     };
+
+    const fetchLikesForPosts = async (posts: Post[], userId: string) => {
+        if (!db) return;
+        const newLikedPosts = new Set<string>();
+        for (const post of posts) {
+            const likeRef = doc(db, "posts", post.id, "likes", userId);
+            const likeDoc = await getDoc(likeRef);
+            if (likeDoc.exists()) {
+                newLikedPosts.add(post.id);
+            }
+        }
+        setLikedPosts(newLikedPosts);
+    }
 
     const fetchRooms = async () => {
         if (!db) return;
@@ -118,7 +153,7 @@ export default function SoundSpherePage() {
             });
             toast({ title: "Success", description: "Your post is live!" });
             setNewPostContent('');
-            fetchPosts();
+            fetchPosts(user.uid);
         } catch (error) {
             console.error("Error creating post:", error);
             toast({ title: "Error", description: "Failed to create post.", variant: "destructive" });
@@ -153,24 +188,40 @@ export default function SoundSpherePage() {
         }
     };
 
-    const handleLikePost = async (postId: string) => {
+    const handleLikePost = async (post: Post) => {
         if (!db || !user) {
             toast({title: "Login Required", description: "You must be logged in to like a post.", variant: "destructive"});
             return;
         };
-        const likeRef = doc(db, "posts", postId, "likes", user.uid);
-        const postRef = doc(db, "posts", postId);
+        const likeRef = doc(db, "posts", post.id, "likes", user.uid);
+        const postRef = doc(db, "posts", post.id);
+        const newLikedPosts = new Set(likedPosts);
         
         try {
             const likeDoc = await getDoc(likeRef);
             if (likeDoc.exists()) {
                 await deleteDoc(likeRef);
                 await updateDoc(postRef, { likes: increment(-1) });
+                newLikedPosts.delete(post.id);
             } else {
                 await setDoc(likeRef, { userId: user.uid });
                 await updateDoc(postRef, { likes: increment(1) });
+                newLikedPosts.add(post.id);
+
+                if (user.uid !== post.authorId) {
+                    await addDoc(collection(db, "notifications"), {
+                        recipientId: post.authorId,
+                        actorId: user.uid,
+                        actorName: user.displayName || 'Someone',
+                        type: 'like',
+                        entityId: post.id,
+                        read: false,
+                        createdAt: serverTimestamp(),
+                    });
+                }
             }
-            fetchPosts(); // In a real app, you might update local state for better UX
+            setLikedPosts(newLikedPosts);
+            fetchPosts(); // Refresh posts for updated counts
         } catch (error) {
             console.error("Error liking post:", error);
             toast({ title: "Error", description: "Could not update like status.", variant: "destructive" });
@@ -206,13 +257,69 @@ export default function SoundSpherePage() {
         }
     };
 
+    const handleCommentClick = async (postId: string) => {
+        if (!db) return;
+        if (commentingOn === postId) {
+            setCommentingOn(null);
+            setPostComments([]);
+        } else {
+            setCommentingOn(postId);
+            const commentsQuery = query(collection(db, "posts", postId, "comments"), orderBy("createdAt", "desc"));
+            const querySnapshot = await getDocs(commentsQuery);
+            const commentsList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Comment);
+            setPostComments(commentsList);
+        }
+    };
+
+    const handleCommentSubmit = async (post: Post) => {
+        if (!db || !user || !commentContent.trim()) {
+            toast({ title: "Error", description: "Please write a comment to post.", variant: "destructive"});
+            return;
+        }
+
+        try {
+            const commentsColRef = collection(db, "posts", post.id, "comments");
+            await addDoc(commentsColRef, {
+                authorId: user.uid,
+                authorName: user.displayName || 'Anonymous',
+                authorAvatar: user.photoURL || '',
+                text: commentContent,
+                createdAt: serverTimestamp(),
+            });
+
+            const postRef = doc(db, "posts", post.id);
+            await updateDoc(postRef, { comments: increment(1) });
+            
+            if (user.uid !== post.authorId) {
+                await addDoc(collection(db, "notifications"), {
+                    recipientId: post.authorId,
+                    actorId: user.uid,
+                    actorName: user.displayName || 'Someone',
+                    type: 'comment',
+                    entityId: post.id,
+                    read: false,
+                    createdAt: serverTimestamp(),
+                });
+            }
+
+            setCommentContent('');
+            fetchPosts(user.uid);
+            handleCommentClick(post.id);
+            toast({ title: "Comment posted!" });
+
+        } catch (error) {
+            console.error("Error posting comment:", error);
+            toast({ title: "Error", description: "Could not post comment.", variant: "destructive"});
+        }
+    };
+
 
     return (
         <SubpageLayout title="Sound Sphere">
             <Tabs defaultValue="feed" className="w-full">
                 <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="feed">Post Feed</TabsTrigger>
-                    <TabsTrigger value="rooms">Audio Rooms</TabsTrigger>
+                    <TabsTrigger value="feed"><Newspaper className="mr-2 h-4 w-4" />Post Feed</TabsTrigger>
+                    <TabsTrigger value="rooms"><Radio className="mr-2 h-4 w-4" />Audio Rooms</TabsTrigger>
                 </TabsList>
                 <TabsContent value="feed" className="mt-6 space-y-6">
                     <Card>
@@ -232,7 +339,7 @@ export default function SoundSpherePage() {
 
                     <div className="space-y-4">
                         {posts.map((post) => (
-                            <Card key={post.id}>
+                            <Card key={post.id} id={`post-${post.id}`}>
                                 <CardContent className="p-6">
                                     <div className="flex items-start gap-4">
                                         <Link href={`/profile/${post.authorId}`}>
@@ -256,16 +363,56 @@ export default function SoundSpherePage() {
                                             </div>
                                             <p className="my-2 text-foreground/90">{post.content}</p>
                                             <div className="flex items-center justify-between text-muted-foreground pt-2">
-                                                <Button variant="ghost" size="sm" className="flex items-center gap-2">
+                                                <Button variant="ghost" size="sm" className="flex items-center gap-2" onClick={() => handleCommentClick(post.id)}>
                                                     <MessageCircle className="h-4 w-4" /> {post.comments}
                                                 </Button>
-                                                <Button variant="ghost" size="sm" className="flex items-center gap-2" onClick={() => handleLikePost(post.id)}>
-                                                    <Heart className="h-4 w-4" /> {post.likes}
+                                                <Button variant="ghost" size="sm" className="flex items-center gap-2" onClick={() => handleLikePost(post)}>
+                                                    <Heart fill={likedPosts.has(post.id) ? 'currentColor' : 'none'} className={`h-4 w-4 ${likedPosts.has(post.id) ? 'text-red-500' : ''}`} /> {post.likes}
                                                 </Button>
                                                 <Button variant="ghost" size="sm" className="flex items-center gap-2">
                                                     <Share2 className="h-4 w-4" /> Share
                                                 </Button>
                                             </div>
+                                            {commentingOn === post.id && (
+                                                <div className="mt-4 pt-4 border-t">
+                                                    <form onSubmit={(e) => { e.preventDefault(); handleCommentSubmit(post); }} className="flex w-full items-start gap-2">
+                                                        <Avatar className="h-9 w-9 mt-1">
+                                                            <AvatarImage src={user?.photoURL || ''} />
+                                                            <AvatarFallback>{user?.displayName?.charAt(0)}</AvatarFallback>
+                                                        </Avatar>
+                                                        <Textarea 
+                                                            placeholder="Write a comment..."
+                                                            value={commentContent}
+                                                            onChange={(e) => setCommentContent(e.target.value)}
+                                                            className="flex-1"
+                                                        />
+                                                        <Button type="submit" size="icon">
+                                                            <Send className="h-4 w-4" />
+                                                        </Button>
+                                                    </form>
+                                                    <ScrollArea className="mt-4 pr-4 max-h-64">
+                                                        <div className="space-y-4">
+                                                            {postComments.map(comment => (
+                                                                <div key={comment.id} className="flex items-start gap-3">
+                                                                    <Link href={`/profile/${comment.authorId}`}>
+                                                                        <Avatar className="h-8 w-8">
+                                                                            <AvatarImage src={comment.authorAvatar} />
+                                                                            <AvatarFallback>{comment.authorName.charAt(0)}</AvatarFallback>
+                                                                        </Avatar>
+                                                                    </Link>
+                                                                    <div className="bg-muted rounded-lg p-3 text-sm flex-1">
+                                                                        <div className="flex items-center justify-between">
+                                                                            <Link href={`/profile/${comment.authorId}`} className="font-semibold text-xs hover:underline">{comment.authorName}</Link>
+                                                                            <span className="text-xs text-muted-foreground">{comment.createdAt ? formatDistanceToNow(comment.createdAt.toDate(), { addSuffix: true }) : ''}</span>
+                                                                        </div>
+                                                                        <p className="mt-1">{comment.text}</p>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </ScrollArea>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 </CardContent>

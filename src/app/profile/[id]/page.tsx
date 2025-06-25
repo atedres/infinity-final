@@ -288,6 +288,20 @@ export default function ProfilePage() {
             } else {
                 await setDoc(followingRef, { since: serverTimestamp() });
                 await setDoc(followerRef, { by: currentUser.displayName || 'Anonymous', at: serverTimestamp() });
+                
+                // Add notification
+                if (currentUser.uid !== profileUser.uid) {
+                    await addDoc(collection(db, "notifications"), {
+                        recipientId: profileUser.uid,
+                        actorId: currentUser.uid,
+                        actorName: currentUser.displayName || 'Someone',
+                        type: 'follow',
+                        entityId: currentUser.uid,
+                        read: false,
+                        createdAt: serverTimestamp(),
+                    });
+                }
+                
                 setIsFollowing(true);
                 setFollowerCount(prev => prev + 1);
                 toast({ title: "Followed", description: `You are now following ${profileUser.firstName}.` });
