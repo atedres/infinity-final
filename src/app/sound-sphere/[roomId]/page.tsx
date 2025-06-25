@@ -84,6 +84,8 @@ export default function AudioRoomPage() {
     const [selectedUser, setSelectedUser] = useState<Participant | null>(null);
     const [followingIds, setFollowingIds] = useState<string[]>([]);
     const [blockedIds, setBlockedIds] = useState<string[]>([]);
+    const [profileStats, setProfileStats] = useState<{posts: number, followers: number, following: number} | null>(null);
+    const [isStatsLoading, setIsStatsLoading] = useState(false);
 
     useEffect(() => {
         const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
@@ -334,6 +336,41 @@ export default function AudioRoomPage() {
 
     }, [currentUser, roomId, db, router, toast]);
 
+    useEffect(() => {
+        if (!selectedUser || !db) {
+            setProfileStats(null);
+            return;
+        }
+
+        const fetchStats = async () => {
+            setIsStatsLoading(true);
+            try {
+                const userId = selectedUser.id;
+                // Using Promise.all to fetch in parallel
+                const [postsSnap, followersSnap, followingSnap] = await Promise.all([
+                    getDocs(query(collection(db, "posts"), where("authorId", "==", userId))),
+                    getDocs(collection(db, "users", userId, "followers")),
+                    getDocs(collection(db, "users", userId, "following"))
+                ]);
+                
+                setProfileStats({
+                    posts: postsSnap.size,
+                    followers: followersSnap.size,
+                    following: followingSnap.size,
+                });
+            } catch (error) {
+                console.error("Error fetching profile stats:", error);
+                toast({ title: "Error", description: "Could not load user stats.", variant: "destructive" });
+                setProfileStats(null);
+            } finally {
+                setIsStatsLoading(false);
+            }
+        };
+
+        fetchStats();
+    }, [selectedUser, db, toast]);
+
+
     const handleLeaveRoom = () => {
         router.push('/sound-sphere'); 
     };
@@ -486,7 +523,7 @@ export default function AudioRoomPage() {
                  {isCreator && speakingRequests.length > 0 && (
                      <Card className="border-primary">
                         <CardHeader>
-                            <CardTitle>Speaking Requests</CardTitle>
+                            <CardTitle>Speaking Requests ({speakingRequests.length})</CardTitle>
                             <CardDescription>Accept or deny requests to speak from listeners.</CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-4">
@@ -546,6 +583,28 @@ export default function AudioRoomPage() {
                                     </Avatar>
                                     <DialogTitle className="text-2xl pt-2">{selectedUser.name}</DialogTitle>
                                 </DialogHeader>
+                                 <div className="grid grid-cols-3 justify-around text-center py-4 border-y divide-x">
+                                    {isStatsLoading ? (
+                                        <div className="col-span-3 text-muted-foreground">Loading...</div>
+                                    ) : profileStats ? (
+                                        <>
+                                            <div className="px-2">
+                                                <p className="font-bold text-lg">{profileStats.posts}</p>
+                                                <p className="text-sm text-muted-foreground">Posts</p>
+                                            </div>
+                                            <div className="px-2">
+                                                <p className="font-bold text-lg">{profileStats.followers}</p>
+                                                <p className="text-sm text-muted-foreground">Followers</p>
+                                            </div>
+                                            <div className="px-2">
+                                                <p className="font-bold text-lg">{profileStats.following}</p>
+                                                <p className="text-sm text-muted-foreground">Following</p>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <div className="col-span-3 text-muted-foreground">Could not load stats.</div>
+                                    )}
+                                </div>
                                 <div className="flex justify-center gap-2 pt-4">
                                     <Button onClick={handleFollowToggle}>
                                         {isFollowingSelected ? <UserCheck className="mr-2 h-4 w-4" /> : <UserPlus className="mr-2 h-4 w-4" />}

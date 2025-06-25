@@ -4,7 +4,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { SubpageLayout } from "@/components/layout/subpage-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -59,6 +59,7 @@ interface Post {
 interface Room {
     id: string;
     creatorName: string;
+    creatorAvatar?: string;
     title: string;
     description: string;
     participantsCount: number;
@@ -85,6 +86,7 @@ interface ProfileUser {
 export default function SoundSpherePage() {
     const { toast } = useToast();
     const router = useRouter();
+    const pathname = usePathname();
     const [user, setUser] = useState<User | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -368,6 +370,7 @@ export default function SoundSpherePage() {
             const newRoomRef = await addDoc(collection(db, "audioRooms"), {
                 creatorId: user.uid,
                 creatorName: user.displayName || 'Anonymous',
+                creatorAvatar: user.photoURL || '',
                 title: roomTitle,
                 description: roomDescription,
                 isPublic: isPublicRoom === "true",
@@ -970,17 +973,27 @@ export default function SoundSpherePage() {
                             </DialogContent>
                         </Dialog>
 
-                         <div className="space-y-4">
+                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {rooms.map((room) => (
-                                <Card key={room.id} className="hover:shadow-md transition-shadow">
-                                    <CardContent className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                                        <div className="flex items-center gap-4">
+                                <Link
+                                    href={user ? `/sound-sphere/${room.id}` : '#'}
+                                    key={room.id}
+                                    className="block"
+                                    onClick={(e) => {
+                                        if (!user) {
+                                            e.preventDefault();
+                                            toast({ title: "Login Required", description: "You must be logged in to join a room.", variant: "destructive" });
+                                        }
+                                    }}
+                                >
+                                    <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
+                                        <CardContent className="p-4 flex items-start gap-4">
                                             <div className="bg-primary/10 p-4 rounded-lg">
                                                 <Mic className="h-6 w-6 text-primary"/>
                                             </div>
-                                            <div className="space-y-1">
+                                            <div className="space-y-1 flex-1">
                                                 <h4 className="font-semibold text-lg">{room.title}</h4>
-                                                <p className="text-sm text-muted-foreground break-all">{room.description || `A conversation with ${room.creatorName}`}</p>
+                                                <p className="text-sm text-muted-foreground break-words">{room.description || `A conversation with ${room.creatorName}`}</p>
                                                 <div className="flex items-center gap-4 text-sm text-muted-foreground pt-1">
                                                     <div className="flex items-center gap-1.5">
                                                         <Users className="h-4 w-4" />
@@ -988,18 +1001,16 @@ export default function SoundSpherePage() {
                                                     </div>
                                                     <div className="flex items-center gap-1.5">
                                                         <Avatar className="h-5 w-5">
+                                                            <AvatarImage src={room.creatorAvatar} />
                                                             <AvatarFallback>{room.creatorName?.[0]}</AvatarFallback>
                                                         </Avatar>
                                                         <span>{room.creatorName}</span>
                                                     </div>
                                                 </div>
                                             </div>
-                                        </div>
-                                        <Link href={`/sound-sphere/${room.id}`} passHref className="w-full sm:w-auto">
-                                            <Button disabled={!user} className="w-full sm:w-auto">Join Room</Button>
-                                        </Link>
-                                    </CardContent>
-                                </Card>
+                                        </CardContent>
+                                    </Card>
+                                </Link>
                              ))}
                          </div>
                     </TabsContent>
@@ -1087,7 +1098,7 @@ export default function SoundSpherePage() {
             {/* Dialog for Viewing Image */}
             <Dialog open={!!viewingImage} onOpenChange={() => setViewingImage(null)}>
                 <DialogContent className="max-w-3xl p-0 bg-transparent border-none shadow-none">
-                    <DialogHeader className="sr-only">
+                     <DialogHeader className="sr-only">
                         <DialogTitle>View Image</DialogTitle>
                         <DialogDescription>Full-screen view of the post image.</DialogDescription>
                     </DialogHeader>
@@ -1096,7 +1107,7 @@ export default function SoundSpherePage() {
             </Dialog>
             
             {/* Floating Action Button for creating a post */}
-            {isCreatePostFabVisible && (
+            {isCreatePostFabVisible && pathname === '/sound-sphere' && (
                  <Dialog open={isCreatePostDialogOpen} onOpenChange={setIsCreatePostDialogOpen}>
                     <DialogTrigger asChild>
                         <Button className="fixed bottom-24 right-6 h-14 w-14 rounded-full shadow-lg z-40" size="icon">
