@@ -72,10 +72,10 @@ export default function AudioRoomPage() {
     const [participants, setParticipants] = useState<Participant[]>([]);
     const [speakingRequests, setSpeakingRequests] = useState<SpeakRequest[]>([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [localAudioStream, setLocalAudioStream] = useState<MediaStream | null>(null);
     const [isMuted, setIsMuted] = useState(true);
     const [hasRequested, setHasRequested] = useState(false);
     
+    const localStreamRef = useRef<MediaStream | null>(null);
     const peersRef = useRef<Record<string, PeerInstance>>({});
     const [remoteStreams, setRemoteStreams] = useState<RemoteStream[]>([]);
 
@@ -98,8 +98,6 @@ export default function AudioRoomPage() {
         const myId = currentUser.uid;
         const myName = currentUser.displayName || 'Anonymous';
         
-        let localStream: MediaStream | null = null;
-        
         let unsubParticipants: () => void = () => {};
         let unsubSignals: () => void = () => {};
         let unsubRoom: () => void = () => {};
@@ -108,14 +106,15 @@ export default function AudioRoomPage() {
         const cleanup = async () => {
             console.log(`[CLEANUP] Cleaning up for user ${myId}`);
 
-            localStream?.getTracks().forEach(track => track.stop());
+            localStreamRef.current?.getTracks().forEach(track => track.stop());
+            localStreamRef.current = null;
             
             Object.values(peersRef.current).forEach(peer => peer.destroy());
             peersRef.current = {};
 
             unsubParticipants();
             unsubSignals();
-            unsubRoom();
+unsubRoom();
             unsubRequests();
 
             const roomRef = doc(db, "audioRooms", roomId);
@@ -123,17 +122,22 @@ export default function AudioRoomPage() {
             try {
                 const currentRoomDoc = await getDoc(roomRef);
                 if (currentRoomDoc.exists()) {
-                    if (currentRoomDoc.data().creatorId === myId) {
-                        console.log(`[CLEANUP] Creator is ending the room.`);
-                        await deleteDoc(roomRef); 
-                    } else {
-                        const participantRef = doc(db, "audioRooms", roomId, "participants", myId);
-                        await deleteDoc(participantRef);
-                        const remainingParticipantsSnap = await getDocs(collection(roomRef, "participants"));
-                        if (remainingParticipantsSnap.size === 0) {
+                    const participantRef = doc(db, "audioRooms", roomId, "participants", myId);
+                    const participantSnap = await getDoc(participantRef);
+
+                    if (participantSnap.exists()) {
+                        if (currentRoomDoc.data().creatorId === myId) {
+                            console.log(`[CLEANUP] Creator is ending the room.`);
+                             // Deleting the room doc will trigger other users to leave
                             await deleteDoc(roomRef);
                         } else {
-                            await updateDoc(roomRef, { participantsCount: remainingParticipantsSnap.size });
+                            await deleteDoc(participantRef);
+                             const remainingParticipantsSnap = await getDocs(collection(roomRef, "participants"));
+                            if (remainingParticipantsSnap.size === 0) {
+                                await deleteDoc(roomRef);
+                            } else {
+                                await updateDoc(roomRef, { participantsCount: remainingParticipantsSnap.size });
+                            }
                         }
                     }
                 }
@@ -145,10 +149,10 @@ export default function AudioRoomPage() {
         const setupRoom = async () => {
             // 1. Get Mic stream
             try {
-                localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-                setLocalAudioStream(localStream);
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                localStreamRef.current = stream;
                 // Start with mic disabled for everyone initially
-                localStream.getAudioTracks().forEach(track => track.enabled = false);
+                stream.getAudioTracks().forEach(track => track.enabled = false);
             } catch (err) {
                 console.error("Error getting mic stream:", err);
                 toast({ title: "Microphone Error", description: "Could not access your microphone.", variant: "destructive" });
@@ -185,8 +189,8 @@ export default function AudioRoomPage() {
                 role: myRole,
             });
             
-            if (isCreator) {
-                localStream.getAudioTracks().forEach(track => track.enabled = true);
+            if (isCreator && localStreamRef.current) {
+                localStreamRef.current.getAudioTracks().forEach(track => track.enabled = true);
                 setIsMuted(false);
             }
 
@@ -202,16 +206,16 @@ export default function AudioRoomPage() {
                 setParticipants(latestParticipants);
 
                 const myData = latestParticipants.find(p => p.id === myId);
-                if (myData && myData.role !== 'listener' && localAudioStream) {
-                    // if I was promoted, enable my mic track for the first time
-                    if (localAudioStream.getAudioTracks().every(t => !t.enabled)) {
-                        localAudioStream.getAudioTracks().forEach(track => track.enabled = true);
-                        setIsMuted(false); // Unmute by default on promotion
+                if (myData?.role !== 'listener' && localStreamRef.current) {
+                    const wasMuted = localStreamRef.current.getAudioTracks().every(t => !t.enabled);
+                    if (wasMuted) {
+                        localStreamRef.current.getAudioTracks().forEach(track => track.enabled = true);
+                        setIsMuted(false);
                     }
                 }
 
                 // Peer connection logic...
-                 const existingPeerIds = Object.keys(peersRef.current);
+                const existingPeerIds = Object.keys(peersRef.current);
                 const latestParticipantIds = latestParticipants.map(p => p.id);
 
                 for (const participant of latestParticipants) {
@@ -219,7 +223,7 @@ export default function AudioRoomPage() {
                         const peer = new Peer({
                              initiator: myId > participant.id,
                              trickle: false,
-                             stream: localStream!,
+                             stream: localStreamRef.current!,
                              config: { iceServers }
                         });
                         
@@ -272,7 +276,9 @@ export default function AudioRoomPage() {
                         const data = change.doc.data();
                         const fromId = data.from;
                         const peer = peersRef.current[fromId];
-                        if (peer && !peer.destroyed) peer.signal(JSON.parse(data.signal));
+                        if (peer && !peer.destroyed) {
+                             peer.signal(JSON.parse(data.signal));
+                        }
                         await deleteDoc(change.doc.ref);
                     }
                 });
@@ -295,7 +301,7 @@ export default function AudioRoomPage() {
 
         setupRoom();
 
-        // Master cleanup function when component unmounts
+        // Master cleanup function when component unmounts or dependencies change
         return () => {
             cleanup();
         };
@@ -307,12 +313,12 @@ export default function AudioRoomPage() {
     };
 
     const handleMuteToggle = async () => {
-        if (!localAudioStream || !currentUser || !db) return;
+        if (!localStreamRef.current || !currentUser || !db) return;
         const myData = participants.find(p => p.id === currentUser.uid);
         if (myData?.role === 'listener') return;
 
         const newMutedState = !isMuted;
-        localAudioStream.getAudioTracks().forEach(track => track.enabled = !newMutedState);
+        localStreamRef.current.getAudioTracks().forEach(track => track.enabled = !newMutedState);
         setIsMuted(newMutedState);
 
         const participantRef = doc(db, "audioRooms", roomId, "participants", currentUser.uid);
@@ -429,7 +435,7 @@ export default function AudioRoomPage() {
                             variant={isMuted ? 'secondary' : 'outline'}
                             size="lg"
                             onClick={handleMuteToggle}
-                            disabled={!localAudioStream}
+                            disabled={!localStreamRef.current}
                             className="w-28"
                         >
                             {isMuted ? <MicOff className="mr-2 h-5 w-5" /> : <Mic className="mr-2 h-5 w-5" />}
