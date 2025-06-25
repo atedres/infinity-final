@@ -165,7 +165,9 @@ export default function AudioRoomPage() {
                     }
                 }
             } catch (error) {
-                 console.error("[CLEANUP] Error during firestore cleanup: ", error);
+                 if (error instanceof Error && (error as any).code !== 'not-found') {
+                    console.error("[CLEANUP] Error during firestore cleanup: ", error);
+                 }
             }
         };
 
@@ -239,7 +241,9 @@ export default function AudioRoomPage() {
                 const currentParticipants = await getDocs(collection(roomDocRef, "participants"));
                 await updateDoc(roomDocRef, { participantsCount: currentParticipants.size });
             } catch(e) {
-                console.warn("Could not update participant count, room may have been deleted.");
+                 if (e instanceof Error && (e as any).code !== 'not-found') {
+                    console.warn("Could not update participant count, room may have been deleted.");
+                 }
             }
             
             setIsLoading(false);
@@ -798,5 +802,3 @@ export default function AudioRoomPage() {
         </SubpageLayout>
     );
 }
-
-    
