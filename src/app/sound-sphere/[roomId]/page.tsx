@@ -481,13 +481,23 @@ export default function AudioRoomPage() {
     }, [remoteStreams, room]);
 
 
-    const handleLeaveRoom = () => {
+    const handleLeaveRoom = async () => {
+        if (document.pictureInPictureElement) {
+            try {
+                await document.exitPictureInPicture();
+            } catch (error) {
+                console.error("Error exiting PiP on leave:", error);
+            }
+        }
         router.push('/sound-sphere?tab=rooms'); 
     };
 
     const handleEndRoom = async () => {
         if (!db || !currentUser || room?.creatorId !== currentUser.uid) return;
         try {
+            if (document.pictureInPictureElement) {
+                await document.exitPictureInPicture();
+            }
             await deleteDoc(doc(db, "audioRooms", roomId));
         } catch(error) {
             console.error("Error ending room:", error);
@@ -909,16 +919,16 @@ export default function AudioRoomPage() {
                             {hasRequested ? 'Request Sent' : 'Request to Speak'}
                          </Button>
                      )}
-                    <Button variant="outline" onClick={handleEnterPip}>
+                    <Button variant="outline" onClick={handleEnterPip} className="sm:w-auto w-full">
                         <PictureInPicture className="mr-2 h-5 w-5" />
                         PiP
                     </Button>
-                    <Button variant="outline" onClick={handleLeaveRoom}>
+                    <Button variant="outline" onClick={handleLeaveRoom} className="sm:w-auto w-full">
                         <LogOut className="mr-2 h-5 w-5" />
                         Leave
                     </Button>
                     {isCreator && (
-                        <Button variant="destructive" onClick={handleEndRoom}>
+                        <Button variant="destructive" onClick={handleEndRoom} className="sm:w-auto w-full">
                             <XCircle className="mr-2 h-5 w-5" />
                             End Room
                         </Button>
@@ -928,5 +938,7 @@ export default function AudioRoomPage() {
         </SubpageLayout>
     );
 }
+
+    
 
     
