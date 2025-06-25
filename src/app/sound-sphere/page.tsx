@@ -1074,7 +1074,7 @@ export default function SoundSpherePage() {
             {isCreatePostFabVisible && (
                  <Dialog open={isCreatePostDialogOpen} onOpenChange={setIsCreatePostDialogOpen}>
                     <DialogTrigger asChild>
-                        <Button className="fixed bottom-24 right-6 h-14 w-14 rounded-full shadow-lg z-40" size="icon">
+                        <Button className="fixed bottom-24 left-6 h-14 w-14 rounded-full shadow-lg z-40" size="icon">
                             <PlusCircle className="h-7 w-7"/>
                         </Button>
                     </DialogTrigger>
