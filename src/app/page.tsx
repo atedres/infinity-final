@@ -302,9 +302,6 @@ export default function Home() {
                         </Tooltip>
                     </nav>
 
-                    <Button variant="outline" size="sm" asChild>
-                        <Link href="/admin-dashboard">Admin</Link>
-                    </Button>
                     {user ? (
                     <div className="flex items-center space-x-2">
                         <DropdownMenu>
@@ -575,3 +572,4 @@ export default function Home() {
   );
 
     
+
