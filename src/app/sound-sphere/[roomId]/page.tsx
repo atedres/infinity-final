@@ -134,9 +134,6 @@ export default function AudioRoomPage() {
         return () => {
              unsubscribeAuth();
              window.removeEventListener('beforeunload', handleBeforeUnload);
-             if (cleanupRef.current) {
-               cleanupRef.current();
-             }
         };
     }, [router, toast]);
     
@@ -186,7 +183,6 @@ export default function AudioRoomPage() {
 
             try {
                 const roomSnap = await getDoc(roomRef);
-                // Only perform deletions if the room still exists
                 if (roomSnap.exists()) {
                     await deleteDoc(participantRef);
 
@@ -306,8 +302,7 @@ export default function AudioRoomPage() {
                     }
                 }
 
-                // Wait until local stream is confirmed to be ready.
-                if (!localStreamRef.current || localStreamRef.current.getAudioTracks().length === 0) {
+                if (!localStreamRef.current || localStreamRef.current.getAudioTracks().length === 0 || !localStreamRef.current.active) {
                     console.warn("[Peer Logic] Skipping peer connection logic: local stream not available or ready.");
                     return;
                 }
@@ -708,7 +703,7 @@ export default function AudioRoomPage() {
                 className="relative flex flex-col items-center gap-2 cursor-pointer transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-70"
             >
                 <Avatar className={cn(
-                    'h-20 w-20 border-4',
+                    'h-16 w-16 sm:h-20 sm:w-20 border-4',
                     isUnmutedSpeaker ? 'border-green-500' : 'border-transparent'
                 )}>
                     <AvatarImage src={p.avatar} data-ai-hint="person portrait"/>
@@ -800,7 +795,7 @@ export default function AudioRoomPage() {
                                 <Mic className="h-5 w-5 text-primary" />
                                 <CardTitle>Speakers ({speakers.length})</CardTitle>
                             </CardHeader>
-                            <CardContent className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-6">
+                            <CardContent className="grid grid-cols-4 sm:grid-cols-6 gap-4">
                                 {speakers.map(renderParticipant)}
                                  {speakers.length === 0 && <p className="text-muted-foreground col-span-full text-center">No speakers yet.</p>}
                             </CardContent>
@@ -811,7 +806,7 @@ export default function AudioRoomPage() {
                                 <Headphones className="h-5 w-5 text-muted-foreground" />
                                 <CardTitle>Listeners ({listeners.length})</CardTitle>
                             </CardHeader>
-                            <CardContent className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-6">
+                            <CardContent className="grid grid-cols-4 sm:grid-cols-6 gap-4">
                                {listeners.map(renderParticipant)}
                                 {listeners.length === 0 && <p className="text-muted-foreground col-span-full text-center">No listeners yet.</p>}
                             </CardContent>

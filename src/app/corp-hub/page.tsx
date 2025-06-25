@@ -118,7 +118,7 @@ export default function CorpHubPage() {
     return (
         <SubpageLayout title="Corporate Hub">
             <Tabs defaultValue="dashboard" className="w-full">
-                <TabsList className="grid w-full grid-cols-3">
+                <TabsList className="grid w-full grid-cols-1 sm:grid-cols-3">
                     <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
                     <TabsTrigger value="tickets" disabled={!user}>Tickets</TabsTrigger>
                     <TabsTrigger value="team">Team</TabsTrigger>

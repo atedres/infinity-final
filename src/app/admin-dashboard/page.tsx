@@ -195,7 +195,7 @@ export default function AdminDashboardPage() {
     return (
         <SubpageLayout title="Admin Dashboard">
             <Tabs defaultValue="courses" className="w-full">
-                <TabsList className="grid w-full grid-cols-3">
+                <TabsList className="grid w-full grid-cols-1 sm:grid-cols-3">
                     <TabsTrigger value="courses">
                         <BookOpen className="mr-2 h-4 w-4" />
                         Manage Courses
@@ -265,7 +265,7 @@ export default function AdminDashboardPage() {
                         </CardHeader>
                         <CardContent>
                             <form onSubmit={handleAddProject} className="space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div className="space-y-2">
                                         <Label htmlFor="project-title">Project Title</Label>
                                         <Input id="project-title" placeholder="e.g., Senior Frontend Engineer" value={projectTitle} onChange={(e) => setProjectTitle(e.target.value)} />
@@ -279,7 +279,7 @@ export default function AdminDashboardPage() {
                                     <Label htmlFor="project-description">Description</Label>
                                     <Textarea id="project-description" placeholder="Detailed job description..." value={projectDescription} onChange={(e) => setProjectDescription(e.target.value)} />
                                 </div>
-                                 <div className="grid grid-cols-2 gap-4">
+                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                    <div className="space-y-2">
                                         <Label htmlFor="remuneration">Remuneration</Label>
                                         <Input id="remuneration" placeholder="e.g., Equity + Salary" value={remuneration} onChange={(e) => setRemuneration(e.target.value)} />
