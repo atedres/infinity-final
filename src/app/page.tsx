@@ -93,8 +93,8 @@ export default function Home() {
       <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-20 max-w-screen-2xl items-center px-4 md:px-6">
             <Link href="/" className="mr-6 flex items-center space-x-2">
-                <InfinityIcon className="h-6 w-6 text-primary" />
-                <span className="font-bold sm:inline-block">
+                <InfinityIcon className="h-7 w-7 text-primary" />
+                <span className="font-bold sm:inline-block text-lg">
                     Infinity Software
                 </span>
             </Link>
@@ -102,9 +102,9 @@ export default function Home() {
                  <nav className="flex items-center gap-1 md:gap-2">
                     <Tooltip>
                         <TooltipTrigger asChild>
-                            <Button variant="ghost" asChild className="px-2">
+                            <Button variant="ghost" asChild className="text-base">
                                 <Link href="/sound-sphere" className="flex items-center gap-2">
-                                    <Mic className="h-5 w-5" />
+                                    <Mic className="h-6 w-6" />
                                     <span className="hidden sm:inline">Sound Sphere</span>
                                 </Link>
                             </Button>
@@ -115,9 +115,9 @@ export default function Home() {
                     </Tooltip>
                      <Tooltip>
                         <TooltipTrigger asChild>
-                            <Button variant="ghost" asChild className="px-2">
+                            <Button variant="ghost" asChild className="text-base">
                                 <Link href="/join-project" className="flex items-center gap-2">
-                                    <Briefcase className="h-5 w-5" />
+                                    <Briefcase className="h-6 w-6" />
                                      <span className="hidden sm:inline">Join Project</span>
                                 </Link>
                             </Button>
