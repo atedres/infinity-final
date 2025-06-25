@@ -161,17 +161,18 @@ export default function AudioRoomPage() {
                 // Ensure the participant document is deleted.
                 await deleteDoc(participantRef);
 
-                // After deleting, check if the room should be deleted.
                 const roomSnap = await getDoc(roomRef);
+                // Check if the room still exists and we are the creator trying to clean up
                 if (roomSnap.exists()) {
                     const participantsCollectionRef = collection(roomRef, "participants");
                     const remainingParticipantsSnap = await getDocs(participantsCollectionRef);
 
+                    // If the room is now empty, delete it
                     if (remainingParticipantsSnap.size === 0) {
                         console.log(`[CLEANUP] Room ${roomId} is empty, deleting.`);
                         await deleteDoc(roomRef);
                     } else {
-                        // Update count if others remain.
+                        // Otherwise, just update the count
                         await updateDoc(roomRef, { participantsCount: remainingParticipantsSnap.size });
                     }
                 }
@@ -185,15 +186,28 @@ export default function AudioRoomPage() {
         };
 
         const setupRoom = async () => {
-            // 1. Get Mic stream
+             // 1. Check permissions and get Mic stream
             try {
+                if (navigator.permissions) {
+                    const permissionStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+                    if (permissionStatus.state === 'denied') {
+                        toast({
+                            title: "Microphone Access Denied",
+                            description: "Please enable microphone permissions in your browser settings to use audio rooms.",
+                            variant: "destructive",
+                            duration: 10000
+                        });
+                        router.push('/sound-sphere');
+                        return;
+                    }
+                }
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
                 localStreamRef.current = stream;
                 // Start with mic disabled for everyone initially
                 stream.getAudioTracks().forEach(track => track.enabled = false);
             } catch (err) {
                 console.error("Error getting mic stream:", err);
-                toast({ title: "Microphone Error", description: "Could not access your microphone.", variant: "destructive" });
+                toast({ title: "Microphone Error", description: "Could not access your microphone. Please grant permission when prompted.", variant: "destructive" });
                 router.push('/sound-sphere');
                 return;
             }
@@ -278,15 +292,16 @@ export default function AudioRoomPage() {
                 // Peer connection logic...
                 const existingPeerIds = Object.keys(peersRef.current);
                 const latestParticipantIds = latestParticipants.map(p => p.id);
+                
+                if (!localStreamRef.current) {
+                    console.warn("[Peer Logic] Skipping peer connection logic: local stream not available.");
+                    return;
+                }
 
                 for (const participant of latestParticipants) {
                     if (participant.id !== myId && !peersRef.current[participant.id]) {
                         // Create a new peer connection
                          try {
-                            if (!localStreamRef.current) {
-                                console.warn("[Peer Creation] Skipping peer creation: local stream not available.");
-                                continue;
-                            }
                             const peer = new Peer({
                                 initiator: myId > participant.id,
                                 trickle: false,

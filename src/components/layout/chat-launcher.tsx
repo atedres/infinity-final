@@ -388,6 +388,29 @@ export function ChatLauncher() {
         });
     };
 
+    const getMicStream = async (): Promise<MediaStream | null> => {
+        try {
+            if (navigator.permissions) {
+                const permissionStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+                if (permissionStatus.state === 'denied') {
+                    toast({
+                        title: "Microphone Access Denied",
+                        description: "Please enable microphone permissions in your browser settings to make or receive calls.",
+                        variant: "destructive",
+                        duration: 10000
+                    });
+                    return null;
+                }
+            }
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            return stream;
+        } catch (error) {
+            console.error("Error getting user media:", error);
+            toast({ title: "Microphone Error", description: "Could not access your microphone. Please grant permission when prompted.", variant: "destructive" });
+            return null;
+        }
+    }
+
     const endCall = async (notifyPeer = true) => {
         if (notifyPeer && peerRef.current?.destroyed === false && selectedChat && currentUser) {
             await sendSignal(selectedChat.otherParticipant.id, selectedChat.id, { type: 'end-call' });
@@ -410,80 +433,76 @@ export function ChatLauncher() {
             toast({ title: "Cannot start call", description: "You are already in a call or one is incoming.", variant: "destructive" });
             return;
         }
-
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-            localStreamRef.current = stream;
-            setCallState('calling');
-            
-            const peer = new Peer({
-                initiator: true,
-                trickle: false,
-                stream: stream,
-                config: { iceServers }
-            });
-            peerRef.current = peer;
-
-            peer.on('signal', (signal) => {
-                sendSignal(chat.otherParticipant.id, chat.id, signal);
-            });
-            peer.on('stream', (remoteStream) => {
-                setRemoteStream(remoteStream);
-                setCallState('active');
-            });
-            peer.on('close', () => endCall(false));
-            peer.on('error', (err) => {
-                console.error('Peer error:', err);
-                toast({ title: "Call Error", description: "An error occurred during the call.", variant: "destructive" });
-                endCall(false);
-            });
-        } catch (error) {
-            console.error("Error getting user media:", error);
-            toast({ title: "Microphone Error", description: "Could not access your microphone. Please check permissions.", variant: "destructive" });
+        
+        const stream = await getMicStream();
+        if (!stream) {
             setCallState('idle');
+            return;
         }
+        localStreamRef.current = stream;
+        setCallState('calling');
+        
+        const peer = new Peer({
+            initiator: true,
+            trickle: false,
+            stream: stream,
+            config: { iceServers }
+        });
+        peerRef.current = peer;
+
+        peer.on('signal', (signal) => {
+            sendSignal(chat.otherParticipant.id, chat.id, signal);
+        });
+        peer.on('stream', (remoteStream) => {
+            setRemoteStream(remoteStream);
+            setCallState('active');
+        });
+        peer.on('close', () => endCall(false));
+        peer.on('error', (err) => {
+            console.error('Peer error:', err);
+            toast({ title: "Call Error", description: "An error occurred during the call.", variant: "destructive" });
+            endCall(false);
+        });
     };
     
     const answerCall = async () => {
         if (!currentUser || !db || !incomingCall) return;
         
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-            localStreamRef.current = stream;
-            
-            const peer = new Peer({
-                initiator: false,
-                trickle: false,
-                stream: stream,
-                config: { iceServers }
-            });
-            peerRef.current = peer;
-            
-            const chatWithCaller = conversations.find(c => c.id === incomingCall.chatId);
-            setSelectedChat(chatWithCaller || null);
-            setCallState('active');
-            
-            peer.on('signal', (signal) => {
-                sendSignal(incomingCall.fromId, incomingCall.chatId, signal);
-            });
-            peer.on('stream', (remoteStream) => {
-                setRemoteStream(remoteStream);
-            });
-            peer.on('close', () => endCall(false));
-            peer.on('error', (err) => {
-                 console.error('Peer error:', err);
-                 toast({ title: "Call Error", description: "An error occurred during the call.", variant: "destructive" });
-                 endCall(false);
-            });
-            
-            peer.signal(JSON.parse(incomingCall.signal));
-            setIncomingCall(null);
-            
-        } catch (error) {
-            console.error("Error answering call:", error);
-            toast({ title: "Microphone Error", description: "Could not access your microphone.", variant: "destructive" });
+        const stream = await getMicStream();
+        if (!stream) {
             endCall(false);
+            declineCall();
+            return;
         }
+        localStreamRef.current = stream;
+        
+        const peer = new Peer({
+            initiator: false,
+            trickle: false,
+            stream: stream,
+            config: { iceServers }
+        });
+        peerRef.current = peer;
+        
+        const chatWithCaller = conversations.find(c => c.id === incomingCall.chatId);
+        setSelectedChat(chatWithCaller || null);
+        setCallState('active');
+        
+        peer.on('signal', (signal) => {
+            sendSignal(incomingCall.fromId, incomingCall.chatId, signal);
+        });
+        peer.on('stream', (remoteStream) => {
+            setRemoteStream(remoteStream);
+        });
+        peer.on('close', () => endCall(false));
+        peer.on('error', (err) => {
+             console.error('Peer error:', err);
+             toast({ title: "Call Error", description: "An error occurred during the call.", variant: "destructive" });
+             endCall(false);
+        });
+        
+        peer.signal(JSON.parse(incomingCall.signal));
+        setIncomingCall(null);
     };
 
     const declineCall = async () => {
