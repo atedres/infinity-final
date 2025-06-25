@@ -11,7 +11,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Mic, Users, MessageCircle, Heart, Share2, PlusCircle, UserPlus, Send, Newspaper, Radio, MoreHorizontal, Edit, Trash2, Repeat, ImagePlus, X } from "lucide-react";
+import { Mic, Users, MessageCircle, Heart, Share2, PlusCircle, UserPlus, Send, Newspaper, Radio, MoreHorizontal, Edit, Trash2, Repeat, ImagePlus, X, Search, Loader2 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
@@ -72,6 +72,13 @@ interface Comment {
     createdAt: Timestamp;
 }
 
+interface ProfileUser {
+    id: string;
+    firstName: string;
+    lastName: string;
+    photoURL?: string;
+}
+
 
 export default function SoundSpherePage() {
     const { toast } = useToast();
@@ -99,7 +106,7 @@ export default function SoundSpherePage() {
     const [isRepostDialogOpen, setIsRepostDialogOpen] = useState(false);
     const [postToRepost, setPostToRepost] = useState<Post | null>(null);
     const [repostComment, setRepostComment] = useState('');
-
+    const [viewingImage, setViewingImage] = useState<string | null>(null);
 
     // Rooms State
     const [rooms, setRooms] = useState<Room[]>([]);
@@ -107,6 +114,20 @@ export default function SoundSpherePage() {
     const [roomTitle, setRoomTitle] = useState('');
     const [roomDescription, setRoomDescription] = useState('');
     const [isPublicRoom, setIsPublicRoom] = useState("true");
+    
+    // Floating Action Button State
+    const createPostCardRef = useRef<HTMLDivElement>(null);
+    const [isCreatePostFabVisible, setIsCreatePostFabVisible] = useState(false);
+    const [isCreatePostDialogOpen, setIsCreatePostDialogOpen] = useState(false);
+    const [newPostContentDialog, setNewPostContentDialog] = useState('');
+    const [postImagesDialog, setPostImagesDialog] = useState<File[]>([]);
+    const [imagePreviewsDialog, setImagePreviewsDialog] = useState<string[]>([]);
+    const fileInputRefDialog = useRef<HTMLInputElement>(null);
+
+    // Search State
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState<ProfileUser[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
 
 
     useEffect(() => {
@@ -121,9 +142,32 @@ export default function SoundSpherePage() {
                 setPosts([]);
                 setRooms([]);
                 setFollowingIds([]);
+                setIsCreatePostFabVisible(false);
             }
         });
-        return () => unsubscribe();
+
+        // Intersection Observer for the floating button
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                if (auth.currentUser) {
+                    setIsCreatePostFabVisible(!entry.isIntersecting);
+                } else {
+                    setIsCreatePostFabVisible(false);
+                }
+            },
+            { rootMargin: "0px 0px -150px 0px", threshold: 0 }
+        );
+
+        if (createPostCardRef.current) {
+            observer.observe(createPostCardRef.current);
+        }
+
+        return () => {
+            unsubscribe();
+            if (createPostCardRef.current) {
+                observer.unobserve(createPostCardRef.current);
+            }
+        };
     }, []);
 
     const fetchPosts = async (currentUserId?: string) => {
@@ -166,6 +210,63 @@ export default function SoundSpherePage() {
         const ids = querySnapshot.docs.map(doc => doc.id);
         setFollowingIds(ids);
     };
+
+    const handleSearch = async (queryTerm: string) => {
+        if (!db || queryTerm.length < 2 || !user) {
+            setSearchResults([]);
+            return;
+        }
+        setIsSearching(true);
+        try {
+            const searchStr = queryTerm.charAt(0).toUpperCase() + queryTerm.slice(1);
+            
+            const usersRef = collection(db, "users");
+            const firstNameQuery = query(usersRef, where("firstName", ">=", searchStr), where("firstName", "<=", searchStr + '\uf8ff'));
+            const lastNameQuery = query(usersRef, where("lastName", ">=", searchStr), where("lastName", "<=", searchStr + '\uf8ff'));
+
+            const [firstNameSnap, lastNameSnap] = await Promise.all([getDocs(firstNameQuery), getDocs(lastNameQuery)]);
+            
+            const resultsMap = new Map<string, ProfileUser>();
+            
+            const processSnapshot = (snap: any) => {
+                snap.docs.forEach((doc: any) => {
+                    if (doc.id !== user.uid && !resultsMap.has(doc.id)) {
+                        const data = doc.data();
+                        resultsMap.set(doc.id, {
+                            id: doc.id,
+                            firstName: data.firstName,
+                            lastName: data.lastName,
+                            photoURL: data.photoURL,
+                        });
+                    }
+                });
+            }
+
+            processSnapshot(firstNameSnap);
+            processSnapshot(lastNameSnap);
+
+            setSearchResults(Array.from(resultsMap.values()));
+        } catch (error) {
+            console.error("Error searching users:", error);
+            toast({ title: "Search Error", description: "Could not perform search.", variant: "destructive" });
+        } finally {
+            setIsSearching(false);
+        }
+    };
+    
+    useEffect(() => {
+        if (!searchQuery.trim()) {
+            setSearchResults([]);
+            setIsSearching(false);
+            return;
+        }
+
+        const debounceTimer = setTimeout(() => {
+            handleSearch(searchQuery);
+        }, 300);
+
+        return () => clearTimeout(debounceTimer);
+    }, [searchQuery, user]);
     
     const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || []);
@@ -470,10 +571,124 @@ export default function SoundSpherePage() {
             setRepostComment('');
         }
     };
+    
+    // Dialog image handlers
+    const handleImageSelectDialog = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(e.target.files || []);
+        if (files.length + postImagesDialog.length > 5) {
+            toast({ title: "Image Limit", description: "You can upload a maximum of 5 images.", variant: "destructive"});
+            return;
+        }
+        setPostImagesDialog(prev => [...prev, ...files]);
+
+        files.forEach(file => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setImagePreviewsDialog(prev => [...prev, reader.result as string]);
+            };
+            reader.readAsDataURL(file);
+        });
+        e.target.value = '';
+    };
+
+    const handleRemoveImageDialog = (indexToRemove: number) => {
+        setPostImagesDialog(prev => prev.filter((_, index) => index !== indexToRemove));
+        setImagePreviewsDialog(prev => prev.filter((_, index) => index !== indexToRemove));
+    };
+
+    const handleCreatePostDialog = async () => {
+        if (!db || !user || !storage) {
+            toast({ title: "Error", description: "You must be logged in to post.", variant: "destructive" });
+            return;
+        }
+        if (!newPostContentDialog.trim() && postImagesDialog.length === 0) {
+            toast({ title: "Error", description: "You must write something or add an image.", variant: "destructive" });
+            return;
+        }
+
+        toast({ title: "Posting...", description: "Your post is being uploaded." });
+
+        let imageUrls: string[] = [];
+        if (postImagesDialog.length > 0) {
+            const uploadPromises = postImagesDialog.map(image => {
+                const imageRef = storageRef(storage, `posts/${user.uid}/${Date.now()}_${image.name}`);
+                return uploadBytes(imageRef, image).then(snapshot => getDownloadURL(snapshot.ref));
+            });
+            try {
+                imageUrls = await Promise.all(uploadPromises);
+            } catch (error) {
+                console.error("Error uploading images:", error);
+                toast({ title: "Image Upload Failed", description: "Could not upload your images.", variant: "destructive" });
+                return;
+            }
+        }
+
+        try {
+            await addDoc(collection(db, "posts"), {
+                authorId: user.uid,
+                authorName: user.displayName || 'Anonymous User',
+                authorHandle: `@${user.email?.split('@')[0] || user.uid.substring(0, 5)}`,
+                authorAvatar: user.photoURL || `https://placehold.co/40x40.png`,
+                content: newPostContentDialog,
+                imageUrls: imageUrls,
+                likes: 0,
+                comments: 0,
+                createdAt: serverTimestamp(),
+            });
+            toast({ title: "Success", description: "Your post is live!" });
+            setNewPostContentDialog('');
+            setPostImagesDialog([]);
+            setImagePreviewsDialog([]);
+            setIsCreatePostDialogOpen(false);
+            fetchPosts(user.uid);
+        } catch (error) {
+            console.error("Error creating post:", error);
+            toast({ title: "Error", description: "Failed to create post.", variant: "destructive" });
+        }
+    };
 
 
     return (
         <SubpageLayout title="Sound Sphere">
+            <div className="relative mb-4">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+                <Input
+                    placeholder="Search for users..."
+                    className="pl-10"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    disabled={!user}
+                />
+                 {isSearching && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                    </div>
+                )}
+                 {searchResults.length > 0 && searchQuery.length > 0 && (
+                    <Card className="absolute z-10 w-full mt-1 max-h-80 overflow-y-auto">
+                        <CardContent className="p-2">
+                            {searchResults.map(profile => (
+                                <div key={profile.id} className="flex items-center justify-between p-2 hover:bg-muted rounded-md">
+                                    <Link href={`/profile/${profile.id}`} className="flex items-center gap-3">
+                                        <Avatar>
+                                            <AvatarImage src={profile.photoURL} />
+                                            <AvatarFallback>{profile.firstName?.[0]}{profile.lastName?.[0]}</AvatarFallback>
+                                        </Avatar>
+                                        <div>
+                                            <p className="font-semibold">{profile.firstName} {profile.lastName}</p>
+                                        </div>
+                                    </Link>
+                                    <Button size="sm" onClick={() => handleFollow(profile.id)}>
+                                        <UserPlus className="h-4 w-4 mr-2" />
+                                        {followingIds.includes(profile.id) ? 'Following' : 'Follow'}
+                                    </Button>
+                                </div>
+                            ))}
+                        </CardContent>
+                    </Card>
+                )}
+            </div>
+
             <TooltipProvider>
                 <Tabs defaultValue="feed" className="w-full">
                     <TabsList className="grid w-full grid-cols-2">
@@ -481,7 +696,7 @@ export default function SoundSpherePage() {
                         <TabsTrigger value="rooms"><Radio className="mr-2 h-4 w-4" />Audio Rooms</TabsTrigger>
                     </TabsList>
                     <TabsContent value="feed" className="mt-6 space-y-6">
-                        <Card>
+                        <Card ref={createPostCardRef}>
                             <CardHeader>
                                 <h3 className="text-lg font-medium">Create a Post</h3>
                             </CardHeader>
@@ -596,7 +811,7 @@ export default function SoundSpherePage() {
                                                 {post.imageUrls && post.imageUrls.length > 0 && (
                                                     <div className={`mt-4 grid gap-1.5 ${post.imageUrls.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
                                                         {post.imageUrls.map((url, index) => (
-                                                            <div key={index} className="relative aspect-video w-full overflow-hidden rounded-lg border">
+                                                            <div key={index} className="relative aspect-video w-full overflow-hidden rounded-lg border cursor-pointer" onClick={() => setViewingImage(url)}>
                                                                 <Image src={url} alt={`Post image ${index+1}`} fill className="object-cover"/>
                                                             </div>
                                                         ))}
@@ -622,7 +837,7 @@ export default function SoundSpherePage() {
                                                             {post.originalPost.imageUrls && post.originalPost.imageUrls.length > 0 && (
                                                                 <div className={`mt-2 grid gap-1 ${post.originalPost.imageUrls.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
                                                                     {post.originalPost.imageUrls.map((url, index) => (
-                                                                        <div key={index} className="relative aspect-video w-full overflow-hidden rounded-md">
+                                                                        <div key={index} className="relative aspect-video w-full overflow-hidden rounded-md cursor-pointer" onClick={() => setViewingImage(url)}>
                                                                             <Image src={url} alt={`Original post image ${index + 1}`} fill className="object-cover" />
                                                                         </div>
                                                                     ))}
@@ -844,6 +1059,61 @@ export default function SoundSpherePage() {
                 </DialogContent>
             </Dialog>
 
+            {/* Dialog for Viewing Image */}
+            <Dialog open={!!viewingImage} onOpenChange={() => setViewingImage(null)}>
+                <DialogContent className="max-w-3xl p-0 bg-transparent border-none shadow-none">
+                    <Image src={viewingImage || ''} alt="Full screen post image" width={1200} height={800} className="w-full h-auto object-contain rounded-lg"/>
+                </DialogContent>
+            </Dialog>
+            
+            {/* Floating Action Button for creating a post */}
+            {isCreatePostFabVisible && (
+                 <Dialog open={isCreatePostDialogOpen} onOpenChange={setIsCreatePostDialogOpen}>
+                    <DialogTrigger asChild>
+                        <Button className="fixed bottom-24 right-6 h-14 w-14 rounded-full shadow-lg z-40" size="icon">
+                            <PlusCircle className="h-7 w-7"/>
+                        </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                        <DialogHeader>
+                            <DialogTitle>Create a Post</DialogTitle>
+                            <DialogDescription>
+                                Share what's on your mind with the community.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4 py-4">
+                            <Textarea 
+                                placeholder="Share your challenges, wins, or questions..." 
+                                value={newPostContentDialog}
+                                onChange={(e) => setNewPostContentDialog(e.target.value)}
+                            />
+                            {imagePreviewsDialog.length > 0 && (
+                                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                                    {imagePreviewsDialog.map((src, index) => (
+                                        <div key={index} className="relative">
+                                            <Image src={src} alt={`Preview ${index + 1}`} width={100} height={100} className="w-full h-full rounded-md object-cover aspect-square" />
+                                            <Button variant="destructive" size="icon" className="absolute top-1 right-1 h-6 w-6 rounded-full" onClick={() => handleRemoveImageDialog(index)}>
+                                                <X className="h-4 w-4" />
+                                            </Button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        <DialogFooter className="flex-col-reverse sm:flex-row sm:justify-between sm:space-x-2">
+                             <input type="file" ref={fileInputRefDialog} className="hidden" multiple accept="image/*" onChange={handleImageSelectDialog} />
+                             <Button variant="ghost" size="icon" onClick={() => fileInputRefDialog.current?.click()}>
+                                <ImagePlus className="h-5 w-5" />
+                                <span className="sr-only">Add images</span>
+                            </Button>
+                            <Button onClick={handleCreatePostDialog} disabled={!user || (!newPostContentDialog.trim() && postImagesDialog.length === 0)}>Post</Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            )}
+
         </SubpageLayout>
     );
 }
+
+    
