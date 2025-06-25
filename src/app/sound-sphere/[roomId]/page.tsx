@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { useToast } from '@/hooks/use-toast';
-import { db, auth } from '@/lib/firebase';
+import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDoc, collection, onSnapshot, setDoc, deleteDoc, updateDoc, increment, query, where, addDoc } from 'firebase/firestore';
 import { Mic, MicOff, LogOut, XCircle } from 'lucide-react';
@@ -36,7 +36,6 @@ interface RemoteStream {
     stream: MediaStream;
 }
 
-// Moved outside the component to prevent re-creation on re-renders
 const AudioPlayer = ({ stream }: { stream: MediaStream }) => {
     const ref = useRef<HTMLAudioElement>(null);
 
@@ -78,195 +77,10 @@ export default function AudioRoomPage() {
         return () => unsubscribeAuth();
     }, [router, toast]);
     
-    // 1. Get microphone permission and local audio stream
-    useEffect(() => {
-        const getMicPermission = async () => {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-                setLocalAudioStream(stream);
-            } catch (error) {
-                console.error("Error accessing microphone:", error);
-                toast({
-                    variant: 'destructive',
-                    title: 'Microphone Access Denied',
-                    description: 'Please enable microphone permissions in your browser settings to participate.',
-                });
-            }
-        };
-        getMicPermission();
-
-        return () => {
-            localAudioStream?.getTracks().forEach(track => track.stop());
-        };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
-    // 2. Fetch initial room data, join room, and listen for participant changes
-    useEffect(() => {
-        if (!db || !roomId || !currentUser) return;
-
-        const roomDocRef = doc(db, "audioRooms", roomId);
-        
-        const getRoomAndJoin = async () => {
-             const roomSnap = await getDoc(roomDocRef);
-             if (!roomSnap.exists()) {
-                 toast({ title: "Room not found", description: "This room may have been deleted.", variant: "destructive" });
-                 router.push('/sound-sphere');
-                 return;
-             }
-             setRoom({ id: roomSnap.id, ...roomSnap.data() } as Room);
-             
-             // Join the room
-             const participantRef = doc(db, "audioRooms", roomId, "participants", currentUser.uid);
-             const participantSnap = await getDoc(participantRef);
-             if (!participantSnap.exists()) {
-                 await setDoc(participantRef, {
-                     name: currentUser.displayName || 'Anonymous',
-                     avatar: currentUser.photoURL || `https://placehold.co/96x96.png`,
-                     isMuted: false,
-                 });
-                 await updateDoc(roomDocRef, { participantsCount: increment(1) });
-             }
-             setIsLoading(false);
-        }
-        getRoomAndJoin();
-
-        const participantsColRef = collection(db, "audioRooms", roomId, "participants");
-        const unsubscribeParticipants = onSnapshot(participantsColRef, (snapshot) => {
-            const participantsList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Participant));
-            setParticipants(participantsList);
-        });
-
-        const unsubscribeRoom = onSnapshot(roomDocRef, (doc) => {
-            if (!doc.exists()) {
-                 if (!isLoading) {
-                    toast({ title: "Room Ended", description: "The room has been closed.", variant: "default" });
-                    router.push('/sound-sphere');
-                 }
-            }
-        });
-
-
-        return () => {
-            unsubscribeParticipants();
-            unsubscribeRoom();
-        };
-
-    }, [roomId, router, toast, currentUser, db, isLoading]);
-    
-    // 3. Initiate connections to other participants
-    useEffect(() => {
-        if (!localAudioStream || !participants.length || !currentUser) return;
-
-        const myId = currentUser.uid;
-
-        participants.forEach(participant => {
-            const peerId = participant.id;
-            if (peerId === myId || peersRef.current[peerId]) return;
-
-            // To prevent double connections, the user with the "smaller" ID initiates
-            if (myId < peerId) {
-                console.log(`INITIATING connection to ${participant.name} (${peerId})`);
-                const peer = new Peer({
-                    initiator: true,
-                    trickle: false,
-                    stream: localAudioStream,
-                });
-                
-                peer.on('signal', (offer) => {
-                    console.log(`SENDING offer to ${peerId}`);
-                    addDoc(collection(db, "audioRooms", roomId, "signals"), {
-                        to: peerId,
-                        from: myId,
-                        signal: JSON.stringify(offer),
-                    });
-                });
-
-                setupPeerListeners(peer, peerId, participant.name);
-                peersRef.current[peerId] = peer;
-            }
-        });
-    }, [participants, localAudioStream, currentUser, db, roomId]);
-
-    // 4. Listen for signals from other participants
-    useEffect(() => {
-        if (!db || !roomId || !currentUser || !localAudioStream) return;
-
-        const myId = currentUser.uid;
-        const q = query(collection(db, "audioRooms", roomId, "signals"), where("to", "==", myId));
-        
-        const unsub = onSnapshot(q, (snapshot) => {
-            snapshot.docChanges().forEach(async (change) => {
-                if (change.type === 'added') {
-                    const signalDoc = change.doc;
-                    const data = signalDoc.data();
-                    const fromId = data.from;
-                    const fromName = participants.find(p => p.id === fromId)?.name || 'Someone';
-                    const signal = JSON.parse(data.signal);
-
-                    let peer = peersRef.current[fromId];
-
-                    if (signal.type === 'offer') {
-                        if (peer) {
-                            console.warn(`Ignoring duplicate offer from ${fromName}`);
-                        } else {
-                            console.log(`RECEIVED offer from ${fromName} (${fromId}). Responding.`);
-                            peer = new Peer({
-                                initiator: false,
-                                trickle: false,
-                                stream: localAudioStream,
-                            });
-        
-                            peer.on('signal', (answer) => {
-                                console.log(`SENDING answer to ${fromId}`);
-                                addDoc(collection(db, "audioRooms", roomId, "signals"), {
-                                    to: fromId,
-                                    from: myId,
-                                    signal: JSON.stringify(answer),
-                                });
-                            });
-        
-                            setupPeerListeners(peer, fromId, fromName);
-                            peersRef.current[fromId] = peer;
-                            peer.signal(signal); // Process the offer
-                        }
-                    } else if (signal.type === 'answer') {
-                        if (peer) {
-                            console.log(`Processing answer from ${fromName} (${fromId})`);
-                            peer.signal(signal); // Process the answer
-                        } else {
-                             console.warn(`Received an answer from ${fromName}, but no peer was ready.`);
-                        }
-                    }
-                    // After processing, delete the signal doc
-                    await deleteDoc(signalDoc.ref);
-                }
-            });
-        });
-
-        return () => unsub();
-    }, [db, roomId, currentUser, localAudioStream, participants]);
-
-
-    // 5. Clean up connections for users who have left
-     useEffect(() => {
-        const connectedPeerIds = Object.keys(peersRef.current);
-        const participantIds = participants.map(p => p.id);
-        
-        connectedPeerIds.forEach(peerId => {
-            if (!participantIds.includes(peerId)) {
-                console.log(`CLEANING UP peer for left user ${peerId}`);
-                peersRef.current[peerId].destroy();
-                delete peersRef.current[peerId];
-                setRemoteStreams(prev => prev.filter(s => s.peerId !== peerId));
-            }
-        });
-    }, [participants]);
-
 
     function setupPeerListeners(peer: PeerInstance, peerId: string, peerName: string) {
         peer.on('stream', (stream) => {
-             console.log(`STREAM received from ${peerName} (${peerId})`);
+             console.log(`[STREAM] Received stream from ${peerName} (${peerId})`);
              setRemoteStreams(prev => {
                 if (prev.some(s => s.peerId === peerId)) return prev;
                 return [...prev, { peerId: peerId, stream }];
@@ -274,16 +88,21 @@ export default function AudioRoomPage() {
         });
         
         peer.on('error', (err) => {
-            console.error(`Peer error with ${peerName} (${peerId}):`, err);
+            console.error(`[PEER ERROR] with ${peerName} (${peerId}):`, err);
             toast({variant: 'destructive', title: `Connection to ${peerName} failed`, description: err.message})
+            if (peersRef.current[peerId]) {
+                peersRef.current[peerId].destroy();
+                delete peersRef.current[peerId];
+            }
+            setRemoteStreams(prev => prev.filter(s => s.peerId !== peerId));
         });
 
         peer.on('connect', () => {
-            console.log(`CONNECTED to ${peerName} (${peerId})!`);
+            console.log(`[CONNECTED] to ${peerName} (${peerId})!`);
         });
         
         peer.on('close', () => {
-             console.log(`CLOSED connection to ${peerName} (${peerId})`);
+             console.log(`[CLOSED] Connection to ${peerName} (${peerId})`);
              setRemoteStreams(prev => prev.filter(s => s.peerId !== peerId));
              if (peersRef.current[peerId]) {
                 delete peersRef.current[peerId];
@@ -291,46 +110,175 @@ export default function AudioRoomPage() {
         });
     }
 
-    const handleLeaveRoom = async (isAutoCleanup = false) => {
+    const handleLeaveRoom = async (isCreator = false) => {
         if (!db || !currentUser || !roomId) return;
         
+        console.log(`[LEAVE] User ${currentUser.uid} leaving room.`);
+
+        // Destroy all peer connections
         Object.values(peersRef.current).forEach(peer => peer.destroy());
         peersRef.current = {};
         
-        const participantRef = doc(db, "audioRooms", roomId, "participants", currentUser.uid);
-        const roomRef = doc(db, "audioRooms", roomId);
-        
-        try {
-            const currentRoomDoc = await getDoc(roomRef);
-            const participantsSnap = await getDocs(collection(roomRef, "participants"));
+        // Stop local media tracks
+        localAudioStream?.getTracks().forEach(track => track.stop());
 
-            if (currentRoomDoc.exists() && participantsSnap.size <= 1) {
-                // This will trigger other clients' listeners to leave
-                await deleteDoc(roomRef); 
-                if (!isAutoCleanup) toast({ title: "Room Ended", description: "The room was closed as it was empty." });
+        const roomRef = doc(db, "audioRooms", roomId);
+
+        try {
+            if (isCreator) {
+                console.log(`[LEAVE] Creator is ending the room.`);
+                await deleteDoc(roomRef);
             } else {
-                 await deleteDoc(participantRef);
-                 await updateDoc(roomRef, { participantsCount: increment(-1) });
-                 if (!isAutoCleanup) toast({ title: "You left the room." });
+                const participantRef = doc(db, "audioRooms", roomId, "participants", currentUser.uid);
+                const currentRoomDoc = await getDoc(roomRef);
+                if(currentRoomDoc.exists()){
+                    const participantsSnap = await getDocs(collection(roomRef, "participants"));
+                    if (participantsSnap.size <= 1) {
+                         console.log(`[LEAVE] Last participant is leaving, deleting room.`);
+                        await deleteDoc(roomRef); 
+                    } else {
+                        console.log(`[LEAVE] Removing participant from room.`);
+                        await deleteDoc(participantRef);
+                        await updateDoc(roomRef, { participantsCount: increment(-1) });
+                    }
+                }
             }
-             router.push('/sound-sphere');
         } catch (error) {
-            console.error("Error leaving room: ", error);
-            if (!isAutoCleanup) toast({ title: "Error", description: "Could not leave the room.", variant: "destructive" });
-             router.push('/sound-sphere');
+            console.error("Error during firestore cleanup: ", error);
+        } finally {
+            router.push('/sound-sphere');
         }
     };
     
-    const handleEndRoom = async () => {
-        if (!db || !currentUser || !room || currentUser.uid !== room.creatorId) return;
+    // Main setup effect
+    useEffect(() => {
+        if (!currentUser || !roomId || !db) return;
 
-        try {
-            await deleteDoc(doc(db, "audioRooms", roomId));
-        } catch (error) {
-            console.error("Error ending room: ", error);
-            toast({ title: "Error", description: "Could not end the room.", variant: "destructive" });
-        }
-    };
+        const myId = currentUser.uid;
+        let stream: MediaStream;
+        
+        // Unsubscribe functions
+        let unsubParticipants: () => void = () => {};
+        let unsubSignals: () => void = () => {};
+        let unsubRoom: () => void = () => {};
+
+        const setupRoom = async () => {
+            // 1. Get Mic stream
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                setLocalAudioStream(stream);
+            } catch (err) {
+                console.error("Error getting mic stream:", err);
+                toast({ title: "Microphone Error", description: "Could not access your microphone.", variant: "destructive" });
+                router.push('/sound-sphere');
+                return;
+            }
+
+            // 2. Get room info and join
+            const roomDocRef = doc(db, "audioRooms", roomId);
+            const roomSnap = await getDoc(roomDocRef);
+            if (!roomSnap.exists()) {
+                toast({ title: "Room not found", variant: "destructive" });
+                router.push('/sound-sphere');
+                return;
+            }
+            setRoom({ id: roomSnap.id, ...roomSnap.data() } as Room);
+
+            unsubRoom = onSnapshot(roomDocRef, (doc) => {
+                if(!doc.exists()){
+                     toast({ title: "Room Ended", description: "The creator has closed the room." });
+                     router.push('/sound-sphere');
+                }
+            });
+
+            const participantRef = doc(db, "audioRooms", roomId, "participants", myId);
+            await setDoc(participantRef, {
+                name: currentUser.displayName || 'Anonymous',
+                avatar: currentUser.photoURL || `https://placehold.co/96x96.png`,
+                isMuted: false,
+            });
+            setIsLoading(false);
+
+
+            // 3. Set up participant listener
+            const participantsColRef = collection(db, "audioRooms", roomId, "participants");
+            unsubParticipants = onSnapshot(participantsColRef, snapshot => {
+                const updatedParticipants = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Participant));
+                setParticipants(updatedParticipants);
+
+                const currentPeerIds = Object.keys(peersRef.current);
+                const newParticipantIds = updatedParticipants.map(p => p.id);
+
+                // Connect to new participants
+                updatedParticipants.forEach(participant => {
+                    if (participant.id !== myId && !peersRef.current[participant.id]) {
+                        console.log(`[SETUP] Creating peer to connect with ${participant.name}`);
+                        const peer = new Peer({
+                            initiator: myId < participant.id,
+                            trickle: false,
+                            stream: stream,
+                        });
+                        
+                        peer.on('signal', (signalData) => {
+                            console.log(`[SIGNAL] Sending signal to ${participant.name}`);
+                            addDoc(collection(db, "audioRooms", roomId, "signals"), {
+                                to: participant.id,
+                                from: myId,
+                                signal: JSON.stringify(signalData),
+                            });
+                        });
+                        
+                        setupPeerListeners(peer, participant.id, participant.name);
+                        peersRef.current[participant.id] = peer;
+                    }
+                });
+
+                // Clean up left participants
+                 currentPeerIds.forEach(peerId => {
+                    if (!newParticipantIds.includes(peerId)) {
+                        console.log(`[CLEANUP] Peer ${peerId} left. Destroying connection.`);
+                        if (peersRef.current[peerId]) {
+                            peersRef.current[peerId].destroy();
+                            delete peersRef.current[peerId];
+                        }
+                        setRemoteStreams(prev => prev.filter(s => s.peerId !== peerId));
+                    }
+                });
+            });
+
+            // 4. Set up signal listener
+            const signalsQuery = query(collection(db, "audioRooms", roomId, "signals"), where("to", "==", myId));
+            unsubSignals = onSnapshot(signalsQuery, (snapshot) => {
+                snapshot.docChanges().forEach(async (change) => {
+                    if (change.type === 'added') {
+                        const data = change.doc.data();
+                        const fromId = data.from;
+                        const signal = JSON.parse(data.signal);
+                        const peer = peersRef.current[fromId];
+
+                        if (peer && !peer.destroyed) {
+                             console.log(`[SIGNAL] Received signal from ${fromId}. Applying.`);
+                            peer.signal(signal);
+                        }
+                        await deleteDoc(change.doc.ref);
+                    }
+                });
+            });
+        };
+
+        setupRoom();
+
+        // MAIN CLEANUP FUNCTION
+        return () => {
+            console.log("[CLEANUP] Component unmounting. Cleaning up room resources.");
+            unsubParticipants();
+            unsubSignals();
+            unsubRoom();
+            handleLeaveRoom();
+        };
+
+    }, [currentUser, roomId, db, router, toast]);
+
 
     const handleMuteToggle = async () => {
         if (!localAudioStream || !currentUser || !db) return;
@@ -348,19 +296,6 @@ export default function AudioRoomPage() {
         }
     };
     
-    useEffect(() => {
-        const handleBeforeUnload = () => {
-            handleLeaveRoom(true);
-        };
-        window.addEventListener('beforeunload', handleBeforeUnload);
-        return () => {
-            window.removeEventListener('beforeunload', handleBeforeUnload);
-            handleLeaveRoom(true);
-        }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [currentUser, roomId]);
-
-
     if (isLoading || !room) {
         return <SubpageLayout title="Sound Sphere Room"><div className="text-center">Loading room...</div></SubpageLayout>;
     }
@@ -380,7 +315,7 @@ export default function AudioRoomPage() {
                     <CardContent className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-6">
                         {participants.map(p => (
                             <div key={p.id} className="relative flex flex-col items-center gap-2">
-                                <Avatar className={`h-20 w-20 border-4 ${!p.isMuted ? 'border-green-500' : 'border-transparent'}`}>
+                                <Avatar className={`h-20 w-20 border-4 ${p.id === currentUser?.uid ? (isMuted ? 'border-transparent' : 'border-green-500') : (p.isMuted ? 'border-transparent' : 'border-green-500')}`}>
                                     <AvatarImage src={p.avatar} data-ai-hint="person portrait"/>
                                     <AvatarFallback>{p.name?.[0]}</AvatarFallback>
                                 </Avatar>
@@ -411,7 +346,7 @@ export default function AudioRoomPage() {
                         Leave
                     </Button>
                     {isCreator && (
-                        <Button variant="destructive" size="lg" onClick={handleEndRoom}>
+                        <Button variant="destructive" size="lg" onClick={() => handleLeaveRoom(true)}>
                             <XCircle className="mr-2 h-5 w-5" />
                             End Room
                         </Button>
