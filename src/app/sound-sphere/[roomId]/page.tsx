@@ -125,7 +125,7 @@ export default function AudioRoomPage() {
         
         const handleBeforeUnload = () => {
            if (cleanupRef.current) {
-               cleanupRef.current();
+               // No-op. We want the audio to continue playing.
            }
         };
         
@@ -196,6 +196,7 @@ export default function AudioRoomPage() {
                     }
                 }
             } catch (error) {
+                 // Check if the error is due to the document not being found, which is okay if it was deleted by another client.
                 if (error instanceof Error && (error as any).code !== 'not-found') {
                     console.error("[CLEANUP] Error during firestore cleanup: ", error);
                 }
@@ -795,7 +796,7 @@ export default function AudioRoomPage() {
                                 <Mic className="h-5 w-5 text-primary" />
                                 <CardTitle>Speakers ({speakers.length})</CardTitle>
                             </CardHeader>
-                            <CardContent className="grid grid-cols-4 sm:grid-cols-6 gap-4">
+                            <CardContent className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-y-4 gap-x-2">
                                 {speakers.map(renderParticipant)}
                                  {speakers.length === 0 && <p className="text-muted-foreground col-span-full text-center">No speakers yet.</p>}
                             </CardContent>
@@ -806,7 +807,7 @@ export default function AudioRoomPage() {
                                 <Headphones className="h-5 w-5 text-muted-foreground" />
                                 <CardTitle>Listeners ({listeners.length})</CardTitle>
                             </CardHeader>
-                            <CardContent className="grid grid-cols-4 sm:grid-cols-6 gap-4">
+                            <CardContent className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-y-4 gap-x-2">
                                {listeners.map(renderParticipant)}
                                 {listeners.length === 0 && <p className="text-muted-foreground col-span-full text-center">No listeners yet.</p>}
                             </CardContent>
@@ -881,12 +882,11 @@ export default function AudioRoomPage() {
                     </DialogContent>
                 </Dialog>
 
-                <div className="flex justify-center gap-4">
+                <div className="flex flex-wrap items-center justify-center gap-2">
                      {canSpeak ? (
                         <>
                         <Button
                             variant={isMuted ? 'secondary' : 'outline'}
-                            size="lg"
                             onClick={handleMuteToggle}
                             disabled={!localStreamRef.current}
                             className="w-28"
@@ -894,14 +894,13 @@ export default function AudioRoomPage() {
                             {isMuted ? <MicOff className="mr-2 h-5 w-5" /> : <Mic className="mr-2 h-5 w-5" />}
                             {isMuted ? 'Unmute' : 'Mute'}
                         </Button>
-                        <Button variant="outline" size="lg" onClick={() => setIsPinLinkDialogOpen(true)}>
+                        <Button variant="outline" onClick={() => setIsPinLinkDialogOpen(true)}>
                             <LinkIcon className="mr-2 h-5 w-5" />
                             Pin Link
                         </Button>
                         </>
                      ) : (
                          <Button
-                            size="lg"
                             onClick={handleRequestToSpeak}
                             disabled={hasRequested}
                             variant="outline"
@@ -910,16 +909,16 @@ export default function AudioRoomPage() {
                             {hasRequested ? 'Request Sent' : 'Request to Speak'}
                          </Button>
                      )}
-                    <Button variant="outline" size="lg" onClick={handleEnterPip}>
+                    <Button variant="outline" onClick={handleEnterPip}>
                         <PictureInPicture className="mr-2 h-5 w-5" />
                         PiP
                     </Button>
-                    <Button variant="outline" size="lg" onClick={handleLeaveRoom}>
+                    <Button variant="outline" onClick={handleLeaveRoom}>
                         <LogOut className="mr-2 h-5 w-5" />
                         Leave
                     </Button>
                     {isCreator && (
-                        <Button variant="destructive" size="lg" onClick={handleEndRoom}>
+                        <Button variant="destructive" onClick={handleEndRoom}>
                             <XCircle className="mr-2 h-5 w-5" />
                             End Room
                         </Button>
@@ -929,3 +928,5 @@ export default function AudioRoomPage() {
         </SubpageLayout>
     );
 }
+
+    
