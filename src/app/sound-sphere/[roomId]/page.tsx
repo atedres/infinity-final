@@ -66,70 +66,6 @@ const iceServers = [
     { urls: 'stun:stun1.l.google.com:19302' },
 ];
 
-const ParticipantAvatar = ({ participant, stream }: { participant: Participant; stream: MediaStream | null }) => {
-    const [isSpeaking, setIsSpeaking] = useState(false);
-    const animationFrameId = useRef<number>();
-
-    useEffect(() => {
-        // This code uses browser-specific APIs, so we ensure it only runs on the client.
-        // It also won't run if there's no stream or the user shouldn't be heard.
-        if (typeof window === 'undefined' || !stream || participant.isMuted || participant.role === 'listener') {
-            setIsSpeaking(false);
-            return;
-        }
-
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const analyser = audioContext.createAnalyser();
-        const source = audioContext.createMediaStreamSource(stream);
-        source.connect(analyser);
-        analyser.fftSize = 512;
-        const bufferLength = analyser.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
-
-        const checkVolume = () => {
-            if (audioContext.state === 'running') {
-                analyser.getByteFrequencyData(dataArray);
-                let sum = 0;
-                for(let i = 0; i < bufferLength; i++) {
-                    sum += dataArray[i];
-                }
-                const average = sum / bufferLength;
-                
-                setIsSpeaking(average > 15);
-                
-                animationFrameId.current = requestAnimationFrame(checkVolume);
-            }
-        };
-
-        checkVolume();
-
-        // This is the effect's cleanup function. It's crucial for preventing errors and memory leaks.
-        return () => {
-            if (animationFrameId.current) {
-                cancelAnimationFrame(animationFrameId.current);
-            }
-            source.disconnect();
-            if (audioContext.state !== 'closed') {
-               audioContext.close();
-            }
-        };
-    }, [stream, participant.isMuted, participant.role]);
-    
-    const isUnmutedSpeaker = (participant.role === 'creator' || participant.role === 'speaker') && !participant.isMuted;
-    
-    return (
-        <Avatar className={cn(
-            'h-20 w-20 border-4 transition-all duration-200',
-            isUnmutedSpeaker ? 'border-green-500' : 'border-transparent',
-            isSpeaking ? 'scale-110 shadow-lg shadow-green-500/50' : 'scale-100'
-        )}>
-            <AvatarImage src={participant.avatar} data-ai-hint="person portrait"/>
-            <AvatarFallback>{participant.name?.[0]}</AvatarFallback>
-        </Avatar>
-    );
-};
-
-
 export default function AudioRoomPage() {
     const { toast } = useToast();
     const router = useRouter();
@@ -642,7 +578,7 @@ export default function AudioRoomPage() {
     const streamMap = new Map(remoteStreams.map(s => [s.peerId, s.stream]));
     
     const renderParticipant = (p: Participant) => {
-        const stream = p.id === currentUser?.uid ? localStreamRef.current : streamMap.get(p.id) || null;
+        const isUnmutedSpeaker = (p.role === 'creator' || p.role === 'speaker') && !p.isMuted;
         
         return (
             <button
@@ -655,7 +591,13 @@ export default function AudioRoomPage() {
                 disabled={p.id === currentUser.uid}
                 className="relative flex flex-col items-center gap-2 cursor-pointer transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-70"
             >
-                <ParticipantAvatar participant={p} stream={stream} />
+                <Avatar className={cn(
+                    'h-20 w-20 border-4',
+                    isUnmutedSpeaker ? 'border-green-500' : 'border-transparent'
+                )}>
+                    <AvatarImage src={p.avatar} data-ai-hint="person portrait"/>
+                    <AvatarFallback>{p.name?.[0]}</AvatarFallback>
+                </Avatar>
                 {(p.isMuted || p.role === 'listener') && (
                     <div className="absolute top-1 right-1 bg-slate-700 rounded-full p-1 border-2 border-background">
                         <MicOff className="h-3 w-3 text-slate-100" />
