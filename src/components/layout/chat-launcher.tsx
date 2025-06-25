@@ -138,6 +138,59 @@ export function ChatLauncher() {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
 
+    // Listen for custom event to open a chat
+    useEffect(() => {
+        const handleOpenChat = async (event: Event) => {
+            if (!currentUser || !db) return;
+
+            const customEvent = event as CustomEvent<{ userId: string }>;
+            const { userId } = customEvent.detail;
+
+            // Find if a conversation already exists in our state
+            const existingChat = conversations.find(c => c.otherParticipant.id === userId);
+
+            if (existingChat) {
+                setSelectedChat(existingChat);
+                setIsOpen(true);
+            } else {
+                // If it doesn't exist, we create a "virtual" chat object to select it.
+                // The real document will be created when the first message is sent.
+                const otherUserDocRef = doc(db, "users", userId);
+                const otherUserDocSnap = await getDoc(otherUserDocRef);
+
+                if (otherUserDocSnap.exists()) {
+                    const otherUserData = otherUserDocSnap.data();
+                    const virtualChat: EnrichedChat = {
+                        id: [currentUser.uid, userId].sort().join('_'),
+                        participants: [currentUser.uid, userId],
+                        participantNames: {
+                            [currentUser.uid]: currentUser.displayName || 'Me',
+                            [userId]: `${otherUserData.firstName} ${otherUserData.lastName}`
+                        },
+                        lastMessage: 'Start the conversation',
+                        lastUpdate: serverTimestamp(),
+                        otherParticipant: {
+                            id: userId,
+                            name: `${otherUserData.firstName} ${otherUserData.lastName}`,
+                            avatar: otherUserData.photoURL || ''
+                        }
+                    };
+                    setSelectedChat(virtualChat);
+                    setIsOpen(true);
+                } else {
+                    toast({ title: 'Error', description: 'Could not find user to chat with.', variant: 'destructive'});
+                }
+            }
+        };
+
+        window.addEventListener('open-chat', handleOpenChat);
+
+        return () => {
+            window.removeEventListener('open-chat', handleOpenChat);
+        };
+    }, [currentUser, db, conversations, toast]);
+
+
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!db || !currentUser || !selectedChat || !newMessage.trim()) return;
@@ -151,6 +204,8 @@ export function ChatLauncher() {
         
         const chatDocRef = doc(db, "chats", selectedChat.id);
         await setDoc(chatDocRef, {
+            participants: selectedChat.participants,
+            participantNames: selectedChat.participantNames,
             lastMessage: newMessage,
             lastUpdate: serverTimestamp(),
         }, { merge: true });

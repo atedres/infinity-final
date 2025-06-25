@@ -7,7 +7,7 @@ import { SubpageLayout } from "@/components/layout/subpage-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from '@/hooks/use-toast';
 import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged, User } from 'firebase/auth';
@@ -419,7 +419,7 @@ export default function AudioRoomPage() {
 
     const handleMessageClick = () => {
         if (!selectedUser) return;
-        router.push(`/profile/${selectedUser.id}`);
+        window.dispatchEvent(new CustomEvent('open-chat', { detail: { userId: selectedUser.id } }));
         setSelectedUser(null);
     };
     
