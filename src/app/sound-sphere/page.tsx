@@ -223,8 +223,13 @@ export default function SoundSpherePage() {
             const usersRef = collection(db, "users");
             const firstNameQuery = query(usersRef, where("firstName", ">=", searchStr), where("firstName", "<=", searchStr + '\uf8ff'));
             const lastNameQuery = query(usersRef, where("lastName", ">=", searchStr), where("lastName", "<=", searchStr + '\uf8ff'));
+            const idQuery = getDoc(doc(db, "users", queryTerm)).catch(() => null);
 
-            const [firstNameSnap, lastNameSnap] = await Promise.all([getDocs(firstNameQuery), getDocs(lastNameQuery)]);
+            const [firstNameSnap, lastNameSnap, idSnap] = await Promise.all([
+                getDocs(firstNameQuery), 
+                getDocs(lastNameQuery),
+                idQuery
+            ]);
             
             const resultsMap = new Map<string, ProfileUser>();
             
@@ -244,6 +249,16 @@ export default function SoundSpherePage() {
 
             processSnapshot(firstNameSnap);
             processSnapshot(lastNameSnap);
+
+            if (idSnap && idSnap.exists() && idSnap.id !== user.uid && !resultsMap.has(idSnap.id)) {
+                 const data = idSnap.data();
+                 resultsMap.set(idSnap.id, {
+                    id: idSnap.id,
+                    firstName: data.firstName,
+                    lastName: data.lastName,
+                    photoURL: data.photoURL,
+                });
+            }
 
             setSearchResults(Array.from(resultsMap.values()));
         } catch (error) {
@@ -653,7 +668,7 @@ export default function SoundSpherePage() {
             <div className="relative mb-4">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
-                    placeholder="Search for users..."
+                    placeholder="Search for users by name or ID..."
                     className="pl-10"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
@@ -1074,7 +1089,7 @@ export default function SoundSpherePage() {
             {isCreatePostFabVisible && (
                  <Dialog open={isCreatePostDialogOpen} onOpenChange={setIsCreatePostDialogOpen}>
                     <DialogTrigger asChild>
-                        <Button className="fixed bottom-24 left-6 h-14 w-14 rounded-full shadow-lg z-40" size="icon">
+                        <Button className="fixed bottom-24 right-6 h-14 w-14 rounded-full shadow-lg z-40" size="icon">
                             <PlusCircle className="h-7 w-7"/>
                         </Button>
                     </DialogTrigger>

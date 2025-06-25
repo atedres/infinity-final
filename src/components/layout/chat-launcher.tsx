@@ -220,12 +220,12 @@ export function ChatLauncher() {
                 ) : (
                     // Conversation List View
                     <ScrollArea className="flex-1">
-                        <div className="p-2 space-y-1">
+                        <div className="py-2">
                             {conversations.length > 0 ? conversations.map(chat => (
                                 <button 
                                     key={chat.id} 
                                     onClick={() => setSelectedChat(chat)}
-                                    className="w-full flex items-center gap-3 p-2 rounded-lg text-left hover:bg-muted"
+                                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-muted border-b"
                                 >
                                     <Avatar>
                                         <AvatarImage src={chat.otherParticipant.avatar} />
