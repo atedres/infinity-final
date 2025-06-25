@@ -164,9 +164,9 @@ export default function AudioRoomPage() {
             const peerId = participant.id;
             if (peerId === myId || peersRef.current[peerId]) return;
 
-            // To prevent double connections, we'll make the user with the "smaller" ID the initiator
+            // To prevent double connections, the user with the "smaller" ID initiates
             if (myId < peerId) {
-                console.log(`INITIATING connection to ${participant.name}`);
+                console.log(`INITIATING connection to ${participant.name} (${peerId})`);
                 const peer = new Peer({
                     initiator: true,
                     trickle: false,
@@ -182,7 +182,7 @@ export default function AudioRoomPage() {
                     });
                 });
 
-                setupPeerListeners(peer, peerId);
+                setupPeerListeners(peer, peerId, participant.name);
                 peersRef.current[peerId] = peer;
             }
         });
@@ -196,45 +196,57 @@ export default function AudioRoomPage() {
         const q = query(collection(db, "audioRooms", roomId, "signals"), where("to", "==", myId));
         
         const unsub = onSnapshot(q, (snapshot) => {
-            snapshot.forEach(async (signalDoc) => {
-                const data = signalDoc.data();
-                const fromId = data.from;
-                const signal = JSON.parse(data.signal);
-                
-                let peer = peersRef.current[fromId];
+            snapshot.docChanges().forEach(async (change) => {
+                if (change.type === 'added') {
+                    const signalDoc = change.doc;
+                    const data = signalDoc.data();
+                    const fromId = data.from;
+                    const fromName = participants.find(p => p.id === fromId)?.name || 'Someone';
+                    const signal = JSON.parse(data.signal);
 
-                // If we receive an offer, it means the other user initiated. We create a peer to respond.
-                if (signal.type === 'offer' && !peer) {
-                    console.log(`RECEIVED offer from ${fromId}. Responding.`);
-                    peer = new Peer({
-                        initiator: false,
-                        trickle: false,
-                        stream: localAudioStream,
-                    });
-                    
-                    peer.on('signal', (answer) => {
-                        console.log(`SENDING answer to ${fromId}`);
-                         addDoc(collection(db, "audioRooms", roomId, "signals"), {
-                             to: fromId,
-                             from: myId,
-                             signal: JSON.stringify(answer),
-                         });
-                    });
+                    let peer = peersRef.current[fromId];
 
-                    setupPeerListeners(peer, fromId);
-                    peersRef.current[fromId] = peer;
+                    if (signal.type === 'offer') {
+                        if (peer) {
+                            console.warn(`Ignoring duplicate offer from ${fromName}`);
+                        } else {
+                            console.log(`RECEIVED offer from ${fromName} (${fromId}). Responding.`);
+                            peer = new Peer({
+                                initiator: false,
+                                trickle: false,
+                                stream: localAudioStream,
+                            });
+        
+                            peer.on('signal', (answer) => {
+                                console.log(`SENDING answer to ${fromId}`);
+                                addDoc(collection(db, "audioRooms", roomId, "signals"), {
+                                    to: fromId,
+                                    from: myId,
+                                    signal: JSON.stringify(answer),
+                                });
+                            });
+        
+                            setupPeerListeners(peer, fromId, fromName);
+                            peersRef.current[fromId] = peer;
+                            peer.signal(signal); // Process the offer
+                        }
+                    } else if (signal.type === 'answer') {
+                        if (peer) {
+                            console.log(`Processing answer from ${fromName} (${fromId})`);
+                            peer.signal(signal); // Process the answer
+                        } else {
+                             console.warn(`Received an answer from ${fromName}, but no peer was ready.`);
+                        }
+                    }
+                    // After processing, delete the signal doc
+                    await deleteDoc(signalDoc.ref);
                 }
-
-                if (peer) {
-                    peer.signal(signal); // This processes the offer or the answer
-                }
-                
-                await deleteDoc(signalDoc.ref);
             });
         });
 
         return () => unsub();
-    }, [db, roomId, currentUser, localAudioStream]);
+    }, [db, roomId, currentUser, localAudioStream, participants]);
+
 
     // 5. Clean up connections for users who have left
      useEffect(() => {
@@ -243,7 +255,7 @@ export default function AudioRoomPage() {
         
         connectedPeerIds.forEach(peerId => {
             if (!participantIds.includes(peerId)) {
-                console.log(`CLEANING UP peer for ${peerId}`);
+                console.log(`CLEANING UP peer for left user ${peerId}`);
                 peersRef.current[peerId].destroy();
                 delete peersRef.current[peerId];
                 setRemoteStreams(prev => prev.filter(s => s.peerId !== peerId));
@@ -252,9 +264,9 @@ export default function AudioRoomPage() {
     }, [participants]);
 
 
-    function setupPeerListeners(peer: PeerInstance, peerId: string) {
+    function setupPeerListeners(peer: PeerInstance, peerId: string, peerName: string) {
         peer.on('stream', (stream) => {
-             console.log(`STREAM received from ${peerId}`);
+             console.log(`STREAM received from ${peerName} (${peerId})`);
              setRemoteStreams(prev => {
                 if (prev.some(s => s.peerId === peerId)) return prev;
                 return [...prev, { peerId: peerId, stream }];
@@ -262,16 +274,16 @@ export default function AudioRoomPage() {
         });
         
         peer.on('error', (err) => {
-            console.error(`Peer error with ${peerId}:`, err);
-            toast({variant: 'destructive', title: `Connection to ${peerId.substring(0,5)} failed`})
+            console.error(`Peer error with ${peerName} (${peerId}):`, err);
+            toast({variant: 'destructive', title: `Connection to ${peerName} failed`, description: err.message})
         });
 
         peer.on('connect', () => {
-            console.log(`CONNECTED to ${peerId}!`);
+            console.log(`CONNECTED to ${peerName} (${peerId})!`);
         });
         
         peer.on('close', () => {
-             console.log(`CLOSED connection to ${peerId}`);
+             console.log(`CLOSED connection to ${peerName} (${peerId})`);
              setRemoteStreams(prev => prev.filter(s => s.peerId !== peerId));
              if (peersRef.current[peerId]) {
                 delete peersRef.current[peerId];
