@@ -69,21 +69,16 @@ const iceServers = [
 const ParticipantAvatar = ({ participant, stream }: { participant: Participant; stream: MediaStream | null }) => {
     const [isSpeaking, setIsSpeaking] = useState(false);
     const animationFrameId = useRef<number>();
-    const audioContextRef = useRef<AudioContext>();
 
     useEffect(() => {
-        if (!stream || participant.isMuted || participant.role === 'listener') {
+        // This code uses browser-specific APIs, so we ensure it only runs on the client.
+        // It also won't run if there's no stream or the user shouldn't be heard.
+        if (typeof window === 'undefined' || !stream || participant.isMuted || participant.role === 'listener') {
             setIsSpeaking(false);
-            if (animationFrameId.current) cancelAnimationFrame(animationFrameId.current);
-            if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-                audioContextRef.current.close();
-            }
             return;
         }
 
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-        audioContextRef.current = audioContext;
-
         const analyser = audioContext.createAnalyser();
         const source = audioContext.createMediaStreamSource(stream);
         source.connect(analyser);
@@ -92,7 +87,7 @@ const ParticipantAvatar = ({ participant, stream }: { participant: Participant; 
         const dataArray = new Uint8Array(bufferLength);
 
         const checkVolume = () => {
-            if (analyser && audioContext.state === 'running') {
+            if (audioContext.state === 'running') {
                 analyser.getByteFrequencyData(dataArray);
                 let sum = 0;
                 for(let i = 0; i < bufferLength; i++) {
@@ -108,11 +103,13 @@ const ParticipantAvatar = ({ participant, stream }: { participant: Participant; 
 
         checkVolume();
 
+        // This is the effect's cleanup function. It's crucial for preventing errors and memory leaks.
         return () => {
-            if (animationFrameId.current) cancelAnimationFrame(animationFrameId.current);
-            if (source) source.disconnect();
-            if (analyser) analyser.disconnect();
-            if (audioContext && audioContext.state !== 'closed') {
+            if (animationFrameId.current) {
+                cancelAnimationFrame(animationFrameId.current);
+            }
+            source.disconnect();
+            if (audioContext.state !== 'closed') {
                audioContext.close();
             }
         };
