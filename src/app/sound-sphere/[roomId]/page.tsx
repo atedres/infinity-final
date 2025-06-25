@@ -454,20 +454,27 @@ export default function AudioRoomPage() {
     const listeners = participants.filter(p => p.role === 'listener');
     
     const renderParticipant = (p: Participant) => (
-         <DialogTrigger asChild key={p.id} disabled={p.id === currentUser.uid} onSelect={() => setSelectedUser(p)}>
-            <div className="relative flex flex-col items-center gap-2 cursor-pointer transition-transform hover:scale-105">
-                 <Avatar className={`h-20 w-20 border-4 ${(p.role === 'creator' || p.role === 'speaker') && !p.isMuted ? 'border-green-500 animate-pulse' : 'border-transparent'}`}>
-                    <AvatarImage src={p.avatar} data-ai-hint="person portrait"/>
-                    <AvatarFallback>{p.name?.[0]}</AvatarFallback>
-                </Avatar>
-                {(p.isMuted || p.role === 'listener') && (
-                    <div className="absolute top-1 right-1 bg-slate-700 rounded-full p-1 border-2 border-background">
-                        <MicOff className="h-3 w-3 text-slate-100" />
-                    </div>
-                )}
-                <p className="font-medium text-sm truncate w-full">{p.name}</p>
-            </div>
-        </DialogTrigger>
+        <button
+            key={p.id}
+            onClick={() => {
+                if (p.id !== currentUser.uid) {
+                    setSelectedUser(p);
+                }
+            }}
+            disabled={p.id === currentUser.uid}
+            className="relative flex flex-col items-center gap-2 cursor-pointer transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-70"
+        >
+            <Avatar className={`h-20 w-20 border-4 ${(p.role === 'creator' || p.role === 'speaker') && !p.isMuted ? 'border-green-500 animate-pulse' : 'border-transparent'}`}>
+                <AvatarImage src={p.avatar} data-ai-hint="person portrait"/>
+                <AvatarFallback>{p.name?.[0]}</AvatarFallback>
+            </Avatar>
+            {(p.isMuted || p.role === 'listener') && (
+                <div className="absolute top-1 right-1 bg-slate-700 rounded-full p-1 border-2 border-background">
+                    <MicOff className="h-3 w-3 text-slate-100" />
+                </div>
+            )}
+            <p className="font-medium text-sm truncate w-full text-center">{p.name}</p>
+        </button>
     );
 
     return (
@@ -506,27 +513,29 @@ export default function AudioRoomPage() {
                     </Card>
                 )}
                 <Dialog open={!!selectedUser} onOpenChange={(isOpen) => !isOpen && setSelectedUser(null)}>
-                    <Card>
-                        <CardHeader className="flex flex-row items-center gap-2">
-                            <Mic className="h-5 w-5 text-primary" />
-                            <CardTitle>Speakers ({speakers.length})</CardTitle>
-                        </CardHeader>
-                        <CardContent className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-6">
-                            {speakers.map(renderParticipant)}
-                             {speakers.length === 0 && <p className="text-muted-foreground col-span-full text-center">No speakers yet.</p>}
-                        </CardContent>
-                    </Card>
+                    <div className="space-y-6">
+                        <Card>
+                            <CardHeader className="flex flex-row items-center gap-2">
+                                <Mic className="h-5 w-5 text-primary" />
+                                <CardTitle>Speakers ({speakers.length})</CardTitle>
+                            </CardHeader>
+                            <CardContent className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-6">
+                                {speakers.map(renderParticipant)}
+                                 {speakers.length === 0 && <p className="text-muted-foreground col-span-full text-center">No speakers yet.</p>}
+                            </CardContent>
+                        </Card>
 
-                    <Card>
-                        <CardHeader className="flex flex-row items-center gap-2">
-                            <Headphones className="h-5 w-5 text-muted-foreground" />
-                            <CardTitle>Listeners ({listeners.length})</CardTitle>
-                        </CardHeader>
-                        <CardContent className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-6">
-                           {listeners.map(renderParticipant)}
-                            {listeners.length === 0 && <p className="text-muted-foreground col-span-full text-center">No listeners yet.</p>}
-                        </CardContent>
-                    </Card>
+                        <Card>
+                            <CardHeader className="flex flex-row items-center gap-2">
+                                <Headphones className="h-5 w-5 text-muted-foreground" />
+                                <CardTitle>Listeners ({listeners.length})</CardTitle>
+                            </CardHeader>
+                            <CardContent className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-6">
+                               {listeners.map(renderParticipant)}
+                                {listeners.length === 0 && <p className="text-muted-foreground col-span-full text-center">No listeners yet.</p>}
+                            </CardContent>
+                        </Card>
+                    </div>
                      <DialogContent>
                         {selectedUser && (
                             <>
@@ -592,4 +601,3 @@ export default function AudioRoomPage() {
         </SubpageLayout>
     );
 }
-
