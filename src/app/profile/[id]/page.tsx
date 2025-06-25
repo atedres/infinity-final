@@ -10,7 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { db, auth, storage } from '@/lib/firebase';
 import { onAuthStateChanged, User, updateProfile } from 'firebase/auth';
 import { doc, getDoc, collection, getDocs, setDoc, deleteDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
-import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { UserPlus, UserCheck, Edit, Camera } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from '@/components/ui/input';
@@ -148,15 +148,22 @@ export default function ProfilePage() {
     };
 
     const handlePictureUpload = async (file: File) => {
-        if (!storage || !currentUser || !profileUser || !db) return;
+        if (!storage) {
+            toast({ title: 'Configuration Error', description: 'Firebase Storage is not configured correctly.', variant: 'destructive'});
+            return;
+        }
+        if (!currentUser) {
+            toast({ title: 'Authentication Error', description: 'You must be logged in to upload a picture.', variant: 'destructive'});
+            return;
+        }
         
-        const filePath = `profile-pictures/${currentUser.uid}/${file.name}`;
+        const filePath = `profile-pictures/${currentUser.uid}/${Date.now()}-${file.name}`;
         const fileRef = storageRef(storage, filePath);
         
         try {
             toast({ title: 'Uploading...', description: 'Your new profile picture is being uploaded.' });
-            await uploadBytes(fileRef, file);
-            const photoURL = await getDownloadURL(fileRef);
+            const uploadResult = await uploadBytes(fileRef, file);
+            const photoURL = await getDownloadURL(uploadResult.ref);
 
             await updateProfile(currentUser, { photoURL });
 
@@ -166,9 +173,15 @@ export default function ProfilePage() {
             setProfileUser(prev => prev ? { ...prev, photoURL } : null);
 
             toast({ title: 'Success!', description: 'Profile picture updated.' });
-        } catch (error) {
+        } catch (error: any) {
             console.error("Error uploading profile picture:", error);
-            toast({ title: 'Upload Failed', description: 'Could not upload the new picture.', variant: 'destructive' });
+            let description = 'Could not upload the new picture. Please try again.';
+            if (error.code === 'storage/unauthorized') {
+                description = "Upload failed. You don't have permission to write to this location. Please check your Firebase Storage security rules."
+            } else if (error.code === 'storage/object-not-found') {
+                description = "The file could not be found. Please try again."
+            }
+            toast({ title: 'Upload Failed', description, variant: 'destructive' });
         }
     };
     
@@ -337,3 +350,5 @@ export default function ProfilePage() {
         </SubpageLayout>
     );
 }
+
+    
