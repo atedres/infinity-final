@@ -286,9 +286,10 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
             // Connect to new participants
             newParticipants.forEach(p => {
                 if (p.id !== currentUser.uid && !peersRef.current[p.id] && localStreamRef.current) {
-                    const shouldInitiate = currentUser.uid > p.id;
-                    if (shouldInitiate) {
-                        const peer = new Peer({ initiator: true, trickle: true, stream: localStreamRef.current, config: { iceServers } });
+                    // The user with the greater ID is the initiator to prevent "glare"
+                    const isInitiator = currentUser.uid > p.id;
+                    if (isInitiator) {
+                        const peer = new Peer({ initiator: true, trickle: false, stream: localStreamRef.current, config: { iceServers } });
                         peersRef.current[p.id] = peer;
                         
                         peer.on('signal', offerSignal => {
@@ -326,11 +327,12 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
                 if (change.type === 'added') {
                     const data = change.doc.data();
                     const signal = JSON.parse(data.signal);
-
+                    
+                    // The non-initiator receives an 'offer' and creates a peer
                     if (signal.type === 'offer') {
                         if (peersRef.current[data.from] || !localStreamRef.current) return;
                         
-                        const peer = new Peer({ initiator: false, trickle: true, stream: localStreamRef.current, config: { iceServers } });
+                        const peer = new Peer({ initiator: false, trickle: false, stream: localStreamRef.current, config: { iceServers } });
                         peersRef.current[data.from] = peer;
 
                         peer.on('signal', answerSignal => {
@@ -351,6 +353,7 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
                         });
                         
                         peer.signal(signal);
+                    // The initiator receives the 'answer' to complete the connection
                     } else if (signal.type === 'answer') {
                         const peer = peersRef.current[data.from];
                         if (peer && !peer.destroyed) {
