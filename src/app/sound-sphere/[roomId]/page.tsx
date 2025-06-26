@@ -13,12 +13,12 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "@/components/ui/input";
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger, SheetDescription } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 import { db } from "@/lib/firebase";
 import { updateProfile } from 'firebase/auth';
-import { doc, collection, setDoc, deleteDoc, updateDoc, writeBatch, deleteField, serverTimestamp, getDoc } from 'firebase/firestore';
+import { doc, collection, setDoc, deleteDoc, updateDoc, writeBatch, deleteField, serverTimestamp, getDoc, query, orderBy, onSnapshot, addDoc } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Mic, MicOff, LogOut, XCircle, Hand, Check, X, Users, Headphones, UserPlus, UserCheck, MessageSquare, UserX, Link as LinkIcon, MoreVertical, Edit, ShieldCheck, TimerIcon, MessageSquareText, Send, Crown, Camera } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -816,7 +816,7 @@ export default function AudioRoomPage() {
                                 </div>
                                 
                                 <SheetTitle className="text-2xl pt-2">{ownProfileData.name}</SheetTitle>
-                                <DialogDescription>{ownProfileDetails.emailHandle}</DialogDescription>
+                                <SheetDescription>{ownProfileDetails.emailHandle}</SheetDescription>
                                 <p className="text-sm text-foreground pt-2">{ownProfileDetails.role}</p>
                             </SheetHeader>
                             <div className="p-4 space-y-4">
@@ -827,6 +827,20 @@ export default function AudioRoomPage() {
                                 <Button className="w-full" onClick={() => setIsEditDialogOpen(true)}>
                                     <Edit className="mr-2 h-4 w-4"/> Edit Profile
                                 </Button>
+                                {(ownProfileData.role === 'creator' || ownProfileData.role === 'moderator') && (
+                                    <Button
+                                        variant="outline"
+                                        className="w-full"
+                                        onClick={() => {
+                                            if (currentUser) {
+                                                changeRole(currentUser.uid, 'listener');
+                                                setIsOwnProfileSheetOpen(false); // Close sheet after action
+                                            }
+                                        }}
+                                    >
+                                        <Headphones className="mr-2 h-4 w-4"/> Move to Listeners
+                                    </Button>
+                                )}
                             </div>
                         </>
                     )}
