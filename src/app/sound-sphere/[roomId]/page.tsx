@@ -414,10 +414,9 @@ export default function AudioRoomPage() {
             }
 
             const roomData = initialRoomSnap.data() as Room;
-            const isCreator = roomData.creatorId === myId;
             const persistedRoles = roomData.roles || {};
             const persistedRole = persistedRoles[myId]; // 'moderator' or 'speaker'
-            const myRole = isCreator ? 'creator' : persistedRole || 'listener';
+            const myRole = roomData.creatorId === myId ? 'creator' : persistedRole || 'listener';
             const isModerator = myRole === 'creator' || myRole === 'moderator';
 
 
@@ -873,6 +872,13 @@ export default function AudioRoomPage() {
         }
     }, [toast]);
 
+    const handleBackWithPip = useCallback((e: React.MouseEvent) => {
+        e.preventDefault();
+        handleEnterPip();
+        router.push('/sound-sphere?tab=rooms');
+    }, [handleEnterPip, router]);
+
+
     // Automatically enter PiP when tab is hidden
     useEffect(() => {
         const handleVisibilityChange = () => {
@@ -1239,7 +1245,7 @@ export default function AudioRoomPage() {
     const canManageSelectedUser = isModerator && selectedUser && selectedUser.id !== currentUser.uid;
 
     return (
-        <SubpageLayout title={room.title} backHref="/sound-sphere?tab=rooms" showTitle={false}>
+        <SubpageLayout title={room.title} backHref="/sound-sphere?tab=rooms" showTitle={false} onBackClick={handleBackWithPip}>
             {remoteStreams.map(remote => <AudioPlayer key={remote.peerId} stream={remote.stream} />)}
             
             <div className="absolute -z-10 opacity-0 pointer-events-none">
