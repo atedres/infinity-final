@@ -16,7 +16,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, collection, onSnapshot, setDoc, deleteDoc, updateDoc, getDocs, query, where, addDoc, serverTimestamp, Timestamp, writeBatch, deleteField } from 'firebase/firestore';
+import { doc, getDoc, collection, onSnapshot, setDoc, deleteDoc, updateDoc, getDocs, query, where, addDoc, serverTimestamp, Timestamp, writeBatch, deleteField, orderBy } from 'firebase/firestore';
 import { Mic, MicOff, LogOut, XCircle, Hand, Check, X, Users, Headphones, UserPlus, UserCheck, MessageSquare, UserX, Link as LinkIcon, MoreVertical, PictureInPicture, Edit, ShieldCheck, TimerIcon, MessageSquareText, Send, Crown } from 'lucide-react';
 import Peer from 'simple-peer';
 import type { Instance as PeerInstance } from 'simple-peer';
