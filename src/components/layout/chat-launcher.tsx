@@ -1,22 +1,23 @@
 
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, createContext, useContext, useCallback } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, query, where, onSnapshot, orderBy, doc, addDoc, serverTimestamp, setDoc, getDoc, updateDoc, increment, writeBatch, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, doc, addDoc, serverTimestamp, setDoc, getDoc, updateDoc, increment, writeBatch, deleteDoc, Timestamp, getDocs, deleteField } from 'firebase/firestore';
 import Peer from 'simple-peer';
 import type { Instance as PeerInstance } from 'simple-peer';
 import 'webrtc-adapter';
 
-import { db, auth } from '@/lib/firebase';
+import { db, auth, storage } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetFooter } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { MessageSquare, Send, ArrowLeft, Phone, PhoneOff, Mic, MicOff } from 'lucide-react';
+import { MessageSquare, Send, ArrowLeft, Phone, PhoneOff, Mic, MicOff, LogOut, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { useNotificationSound } from '@/hooks/use-notification-sound';
@@ -56,36 +57,471 @@ interface IncomingCall {
     signal: string;
 }
 
+export interface Room {
+    id: string;
+    title: string;
+    description: string;
+    creatorId: string;
+    pinnedLink?: string;
+    roles?: { [key: string]: 'speaker' | 'moderator' };
+    createdAt: Timestamp;
+}
+
+export interface Participant {
+    id: string;
+    name: string;
+    avatar: string;
+    isMuted: boolean;
+    role: 'creator' | 'moderator' | 'speaker' | 'listener';
+}
+
+interface SpeakRequest {
+    id: string;
+    name: string;
+    avatar: string;
+}
+
+interface RemoteStream {
+    peerId: string;
+    stream: MediaStream;
+}
+
+interface RoomChatMessage {
+    id: string;
+    text: string;
+    senderId: string;
+    senderName: string;
+    senderAvatar: string;
+    createdAt: Timestamp;
+}
+
+interface SpeakerInvitation {
+    inviterId: string;
+    inviterName: string;
+}
+
+interface ProfileStats {
+    posts: number;
+    followers: number;
+    following: number;
+}
+
+
 const iceServers = [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
-    { urls: 'stun:stun4.l.google.com:19302' },
-    { urls: 'stun:stun.services.mozilla.com' },
-    { urls: "stun:stun.ekiga.net" },
-    { urls: "stun:stun.ideasip.com" },
-    { urls: "stun:stun.voiparound.com" },
-    { urls: "stun:stun.voipraider.com" },
-    { urls: "stun:stun.voipstunt.com" },
-    { urls: "stun:stun.voxgratia.org" },
-    { urls: "stun:stun.xten.com" },
 ];
 
 const AudioPlayer = ({ stream }: { stream: MediaStream }) => {
     const ref = useRef<HTMLAudioElement>(null);
-
     useEffect(() => {
-        if (ref.current) {
-            ref.current.srcObject = stream;
-        }
+        if (ref.current) ref.current.srcObject = stream;
     }, [stream]);
-
     return <audio ref={ref} autoPlay playsInline />;
 };
 
-// A new self-contained component for the chat launcher
-export function ChatLauncher() {
+const FloatingRoomContext = createContext<any>(null);
+export const useFloatingRoom = () => useContext(FloatingRoomContext);
+
+
+function FloatingRoomProvider({ children }: { children: React.ReactNode }) {
+    const { toast } = useToast();
+    const [currentUser, setCurrentUser] = useState<User | null>(null);
+    const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+    const [isFloating, setIsFloating] = useState(false);
+
+    // Room State
+    const [roomData, setRoomData] = useState<Room | null>(null);
+    const [participants, setParticipants] = useState<Participant[]>([]);
+    const [speakingRequests, setSpeakingRequests] = useState<SpeakRequest[]>([]);
+    const [isMuted, setIsMuted] = useState(true);
+    const [hasRequested, setHasRequested] = useState(false);
+    const [speakerInvitation, setSpeakerInvitation] = useState<SpeakerInvitation | null>(null);
+    const [elapsedTime, setElapsedTime] = useState('00:00');
+    const [chatMessages, setChatMessages] = useState<RoomChatMessage[]>([]);
+    const [isRoomLoading, setIsRoomLoading] = useState(true);
+
+    // User relations state
+    const [followingIds, setFollowingIds] = useState<string[]>([]);
+    const [blockedIds, setBlockedIds] = useState<string[]>([]);
+    const [profileStats, setProfileStats] = useState<ProfileStats | null>(null);
+    const [isStatsLoading, setIsStatsLoading] = useState(false);
+
+    // WebRTC State
+    const localStreamRef = useRef<MediaStream | null>(null);
+    const peersRef = useRef<Record<string, PeerInstance>>({});
+    const [remoteStreams, setRemoteStreams] = useState<RemoteStream[]>([]);
+    const cleanupRef = useRef<() => void>();
+
+    useEffect(() => {
+        const unsub = onAuthStateChanged(auth, user => setCurrentUser(user));
+        return unsub;
+    }, []);
+
+    const getMicStream = useCallback(async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            localStreamRef.current = stream;
+            return stream;
+        } catch (err) {
+            toast({ title: "Microphone Error", description: "Could not access your microphone.", variant: "destructive" });
+            return null;
+        }
+    }, [toast]);
+
+    const joinRoom = useCallback(async (roomId: string) => {
+        if (!currentUser || !db) return;
+        if (activeRoomId && activeRoomId !== roomId) {
+            await leaveRoom();
+        }
+        setIsRoomLoading(true);
+        setActiveRoomId(roomId);
+        setIsFloating(false);
+
+        await getMicStream();
+
+        const banRef = doc(db, "audioRooms", roomId, "bannedUsers", currentUser.uid);
+        const banSnap = await getDoc(banRef);
+        if (banSnap.exists()) {
+            toast({ title: "Access Denied", description: "You have been banned from this room.", variant: "destructive" });
+            leaveRoom();
+            return;
+        }
+        
+        // Setup Firestore listeners and WebRTC logic
+        const roomDocRef = doc(db, "audioRooms", roomId);
+        
+        const unsubRoom = onSnapshot(roomDocRef, (docSnap) => {
+            if (!docSnap.exists()) {
+                setRoomData(null);
+                setIsRoomLoading(false);
+                return;
+            }
+            setRoomData({ id: docSnap.id, ...docSnap.data() } as Room);
+        });
+
+        // Add self to participants
+        const roomSnap = await getDoc(roomDocRef);
+        if (!roomSnap.exists()) {
+            setIsRoomLoading(false);
+            return;
+        }
+        const initialRoomData = roomSnap.data() as Room;
+        const myRole = initialRoomData.creatorId === currentUser.uid ? 'creator' : (initialRoomData.roles?.[currentUser.uid] || 'listener');
+        const initialMute = myRole === 'listener';
+
+        const participantRef = doc(db, "audioRooms", roomId, "participants", currentUser.uid);
+        await setDoc(participantRef, {
+            name: currentUser.displayName,
+            avatar: currentUser.photoURL,
+            isMuted: initialMute,
+            role: myRole,
+        });
+        setIsMuted(initialMute);
+        if (!initialMute) {
+            localStreamRef.current?.getAudioTracks().forEach(t => t.enabled = true);
+        } else {
+             localStreamRef.current?.getAudioTracks().forEach(t => t.enabled = false);
+        }
+
+        const participantsColRef = collection(db, "audioRooms", roomId, "participants");
+        const unsubParticipants = onSnapshot(participantsColRef, snapshot => {
+            const newParticipants = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Participant));
+            setParticipants(newParticipants);
+            // Peer connection logic
+            newParticipants.forEach(p => {
+                if (p.id !== currentUser.uid && !peersRef.current[p.id] && localStreamRef.current) {
+                    const peer = new Peer({ initiator: true, trickle: false, stream: localStreamRef.current, config: { iceServers }});
+                    peer.on('signal', async signal => {
+                       await addDoc(collection(db, `audioRooms/${roomId}/signals`), { to: p.id, from: currentUser.uid, signal: JSON.stringify(signal) });
+                    });
+                    peer.on('stream', stream => setRemoteStreams(prev => [...prev.filter(s => s.peerId !== p.id), { peerId: p.id, stream }]));
+                    peer.on('close', () => {
+                        delete peersRef.current[p.id];
+                        setRemoteStreams(prev => prev.filter(s => s.peerId !== p.id));
+                    });
+                    peersRef.current[p.id] = peer;
+                }
+            });
+            const pIds = new Set(newParticipants.map(p => p.id));
+            Object.keys(peersRef.current).forEach(peerId => {
+                if (!pIds.has(peerId)) {
+                    peersRef.current[peerId].destroy();
+                    delete peersRef.current[peerId];
+                    setRemoteStreams(prev => prev.filter(s => s.peerId !== peerId));
+                }
+            });
+
+        });
+        
+        const signalsQuery = query(collection(db, `audioRooms/${roomId}/signals`), where("to", "==", currentUser.uid));
+        const unsubSignals = onSnapshot(signalsQuery, snapshot => {
+            snapshot.docChanges().forEach(async change => {
+                if (change.type === 'added') {
+                    const data = change.doc.data();
+                    const peer = peersRef.current[data.from];
+                    if (peer && !peer.destroyed) {
+                        peer.signal(JSON.parse(data.signal));
+                    } else if (!peer && localStreamRef.current) {
+                        const newPeer = new Peer({ initiator: false, trickle: false, stream: localStreamRef.current, config: { iceServers }});
+                        newPeer.on('signal', async signal => {
+                            await addDoc(collection(db, `audioRooms/${roomId}/signals`), { to: data.from, from: currentUser.uid, signal: JSON.stringify(signal) });
+                        });
+                        newPeer.on('stream', stream => setRemoteStreams(prev => [...prev.filter(s => s.peerId !== data.from), { peerId: data.from, stream }]));
+                        newPeer.on('close', () => {
+                            delete peersRef.current[data.from];
+                            setRemoteStreams(prev => prev.filter(s => s.peerId !== data.from));
+                        });
+                        newPeer.signal(JSON.parse(data.signal));
+                        peersRef.current[data.from] = newPeer;
+                    }
+                    await deleteDoc(change.doc.ref);
+                }
+            });
+        });
+
+        // Other listeners (requests, chat, etc.)
+        const requestsRef = collection(db, "audioRooms", roomId, "requests");
+        const unsubRequests = onSnapshot(requestsRef, snapshot => setSpeakingRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SpeakRequest))));
+        const chatRef = query(collection(db, "audioRooms", roomId, "chatMessages"), orderBy("createdAt", "asc"));
+        const unsubChat = onSnapshot(chatRef, snapshot => setChatMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as RoomChatMessage)));
+        const inviteRef = doc(db, "audioRooms", roomId, "invitations", currentUser.uid);
+        const unsubInvite = onSnapshot(inviteRef, doc => setSpeakerInvitation(doc.exists() ? doc.data() as SpeakerInvitation : null));
+
+        const myRequestRef = doc(db, "audioRooms", roomId, "requests", currentUser.uid);
+        const myRequestSnap = await getDoc(myRequestRef);
+        setHasRequested(myRequestSnap.exists());
+        
+        setIsRoomLoading(false);
+
+        cleanupRef.current = () => {
+            unsubRoom();
+            unsubParticipants();
+            unsubSignals();
+            unsubRequests();
+            unsubChat();
+            unsubInvite();
+        };
+
+    }, [currentUser, activeRoomId, toast, getMicStream]);
+    
+    const leaveRoom = useCallback(async () => {
+        if (!activeRoomId || !currentUser || !db) return;
+
+        cleanupRef.current?.();
+        cleanupRef.current = undefined;
+
+        localStreamRef.current?.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
+        Object.values(peersRef.current).forEach(peer => peer.destroy());
+        peersRef.current = {};
+
+        const participantRef = doc(db, "audioRooms", activeRoomId, "participants", currentUser.uid);
+        await deleteDoc(participantRef);
+
+        setActiveRoomId(null);
+        setRoomData(null);
+        setParticipants([]);
+        setRemoteStreams([]);
+        setIsFloating(false);
+    }, [activeRoomId, currentUser]);
+    
+    const endRoom = useCallback(async () => {
+        if (!activeRoomId || !currentUser || !db) return;
+        if (roomData?.creatorId !== currentUser.uid) return;
+        await deleteDoc(doc(db, "audioRooms", activeRoomId));
+        await leaveRoom();
+    }, [activeRoomId, currentUser, roomData, leaveRoom]);
+    
+    const showFloatingPlayer = useCallback(() => {
+        if (activeRoomId) setIsFloating(true);
+    }, [activeRoomId]);
+
+    const toggleMute = useCallback(async () => {
+        if (!localStreamRef.current || !currentUser || !db || !activeRoomId) return;
+        const newMutedState = !isMuted;
+        localStreamRef.current.getAudioTracks().forEach(track => track.enabled = !newMutedState);
+        setIsMuted(newMutedState);
+        await updateDoc(doc(db, "audioRooms", activeRoomId, "participants", currentUser.uid), { isMuted: newMutedState });
+    }, [isMuted, activeRoomId, currentUser]);
+
+    // ... Other actions (requestToSpeak, manageRequest, etc.) converted to use activeRoomId and currentUser
+     const requestToSpeak = useCallback(async () => {
+        if (!currentUser || !db || !activeRoomId) return;
+        await setDoc(doc(db, "audioRooms", activeRoomId, "requests", currentUser.uid), { name: currentUser.displayName, avatar: currentUser.photoURL });
+        setHasRequested(true);
+        toast({ title: "Request Sent" });
+    }, [currentUser, activeRoomId, toast]);
+
+    const manageRequest = useCallback(async (requesterId: string, accept: boolean) => {
+        if (!db || !currentUser || !activeRoomId) return;
+        await deleteDoc(doc(db, "audioRooms", activeRoomId, "requests", requesterId));
+        if (accept) {
+            await setDoc(doc(db, "audioRooms", activeRoomId, "invitations", requesterId), { inviterId: currentUser.uid, inviterName: currentUser.displayName });
+        }
+    }, [currentUser, activeRoomId]);
+    
+    const acceptInvite = useCallback(async () => {
+        if (!db || !currentUser || !activeRoomId) return;
+        const batch = writeBatch(db);
+        batch.update(doc(db, "audioRooms", activeRoomId, "participants", currentUser.uid), { role: 'speaker', isMuted: false });
+        batch.update(doc(db, "audioRooms", activeRoomId), { [`roles.${currentUser.uid}`]: 'speaker' });
+        batch.delete(doc(db, "audioRooms", activeRoomId, "invitations", currentUser.uid));
+        await batch.commit();
+        setIsMuted(false);
+        localStreamRef.current?.getAudioTracks().forEach(track => track.enabled = true);
+        toast({ title: "You are now a speaker!" });
+    }, [currentUser, activeRoomId, toast]);
+    
+    const declineInvite = useCallback(async () => {
+        if (!db || !currentUser || !activeRoomId) return;
+        await deleteDoc(doc(db, "audioRooms", activeRoomId, "invitations", currentUser.uid));
+    }, [currentUser, activeRoomId]);
+    
+    const changeRole = useCallback(async (targetId: string, newRole: 'moderator' | 'speaker' | 'listener') => {
+        if (!db || !activeRoomId || !currentUser) return;
+        const participantRef = doc(db, "audioRooms", activeRoomId, "participants", targetId);
+        if (newRole === 'speaker' && (await getDoc(participantRef)).data()?.role === 'listener') {
+            await setDoc(doc(db, "audioRooms", activeRoomId, "invitations", targetId), { inviterId: currentUser.uid, inviterName: currentUser.displayName });
+            toast({ title: "Invitation Sent" });
+            return;
+        }
+        const batch = writeBatch(db);
+        batch.update(participantRef, { role: newRole, isMuted: newRole === 'listener' });
+        if (newRole === 'listener') {
+            batch.update(doc(db, "audioRooms", activeRoomId), { [`roles.${targetId}`]: deleteField() });
+        } else {
+            batch.update(doc(db, "audioRooms", activeRoomId), { [`roles.${targetId}`]: newRole });
+        }
+        await batch.commit();
+        toast({ title: "Role Updated" });
+    }, [activeRoomId, currentUser, toast]);
+    
+    const removeUser = useCallback(async (targetId: string) => {
+        if (!db || !activeRoomId || !currentUser) return;
+        const batch = writeBatch(db);
+        batch.set(doc(db, "audioRooms", activeRoomId, "bannedUsers", targetId), { bannedAt: serverTimestamp(), bannedBy: currentUser.uid });
+        batch.update(doc(db, "audioRooms", activeRoomId, "participants", targetId), { kicked: true });
+        await batch.commit();
+        toast({ title: "User Banned" });
+    }, [activeRoomId, currentUser, toast]);
+
+    const sendChatMessage = useCallback(async (text: string) => {
+        if (!db || !currentUser || !activeRoomId || !text.trim()) return;
+        await addDoc(collection(db, "audioRooms", activeRoomId, "chatMessages"), {
+            text,
+            senderId: currentUser.uid,
+            senderName: currentUser.displayName,
+            senderAvatar: currentUser.photoURL,
+            createdAt: serverTimestamp(),
+        });
+    }, [currentUser, activeRoomId]);
+
+    const pinLink = useCallback(async (link: string) => {
+        if (!db || !activeRoomId) return;
+        await updateDoc(doc(db, "audioRooms", activeRoomId), { pinnedLink: link });
+        toast({ title: "Link Pinned" });
+    }, [activeRoomId, toast]);
+
+    const unpinLink = useCallback(async () => {
+        if (!db || !activeRoomId) return;
+        await updateDoc(doc(db, "audioRooms", activeRoomId), { pinnedLink: "" });
+        toast({ title: "Link Unpinned" });
+    }, [activeRoomId, toast]);
+
+    const updateRoomTitle = useCallback(async (title: string) => {
+        if (!db || !activeRoomId) return;
+        await updateDoc(doc(db, "audioRooms", activeRoomId), { title });
+        toast({ title: "Title Updated" });
+    }, [activeRoomId, toast]);
+
+
+    useEffect(() => {
+        if (!roomData?.createdAt) return;
+        const interval = setInterval(() => {
+            const diff = new Date().getTime() - roomData.createdAt.toDate().getTime();
+            const h = Math.floor(diff / (1000 * 60 * 60));
+            const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const s = Math.floor((diff % (1000 * 60)) / 1000);
+            const p = (n: number) => n.toString().padStart(2, '0');
+            setElapsedTime(h > 0 ? `${p(h)}:${p(m)}:${p(s)}` : `${p(m)}:${p(s)}`);
+        }, 1000);
+        return () => clearInterval(interval);
+    }, [roomData?.createdAt]);
+
+
+    const value = {
+        currentUser,
+        roomData,
+        participants,
+        speakingRequests,
+        isMuted,
+        hasRequested,
+        speakerInvitation,
+        elapsedTime,
+        chatMessages,
+        followingIds,
+        blockedIds,
+        profileStats,
+        isStatsLoading,
+        joinRoom,
+        leaveRoom,
+        endRoom,
+        toggleMute,
+        requestToSpeak,
+        manageRequest,
+        changeRole,
+        acceptInvite,
+        declineInvite,
+        removeUser,
+        sendChatMessage,
+        pinLink,
+        unpinLink,
+        updateRoomTitle,
+        showFloatingPlayer,
+        storage,
+        isRoomLoading,
+        remoteStreams,
+    };
+
+    return (
+        <FloatingRoomContext.Provider value={value}>
+            {children}
+        </FloatingRoomContext.Provider>
+    );
+}
+
+function FloatingRoomPlayer() {
+    const { isFloating, roomData, leaveRoom, remoteStreams } = useFloatingRoom();
+
+    if (!isFloating || !roomData) {
+        return null;
+    }
+
+    return (
+        <>
+            {remoteStreams.map((remote: RemoteStream) => (
+                <AudioPlayer key={remote.peerId} stream={remote.stream} />
+            ))}
+            <div className="fixed bottom-6 right-24 z-50">
+                <Card className="w-80 shadow-2xl">
+                    <CardContent className="p-3 flex items-center justify-between">
+                        <div className="flex-1 truncate pr-2">
+                            <p className="font-semibold truncate">{roomData.title}</p>
+                            <p className="text-sm text-muted-foreground">Listening...</p>
+                        </div>
+                        <Button variant="destructive" size="icon" onClick={leaveRoom} className="h-9 w-9">
+                            <LogOut className="h-4 w-4" />
+                        </Button>
+                    </CardContent>
+                </Card>
+            </div>
+        </>
+    );
+}
+
+
+function ChatLauncherUI() {
     const { toast } = useToast();
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [isOpen, setIsOpen] = useState(false);
@@ -142,7 +578,6 @@ export function ChatLauncher() {
     useEffect(() => {
         if (typeof window === 'undefined') return;
 
-        // Lazily create Audio elements
         if (!incomingCallAudioRef.current) {
             incomingCallAudioRef.current = new Audio('/incoming-call.mp3');
             incomingCallAudioRef.current.loop = true;
@@ -176,7 +611,6 @@ export function ChatLauncher() {
             stopAll();
         }
         
-        // Cleanup on component unmount
         return stopAll; 
 
     }, [callState]);
@@ -213,7 +647,6 @@ export function ChatLauncher() {
                         peerRef.current?.signal(signal);
                     }
                     
-                    // Delete signal doc after processing
                     await deleteDoc(change.doc.ref);
                 }
             });
@@ -245,11 +678,8 @@ export function ChatLauncher() {
                     const oldChat = conversationsRef.current.find(c => c.id === change.doc.id);
                     const oldUnread = oldChat?.unreadCount || 0;
                     const newUnread = data.unreadCounts?.[currentUser.uid] || 0;
-
-                    // It's a new message for me if the unread count increased and I'm not looking at that chat
                     const isNewUnread = newUnread > oldUnread;
                     const isNotSelectedChat = selectedChatRef.current?.id !== change.doc.id;
-
                     return isNewUnread && isNotSelectedChat;
                 }
                 return false;
@@ -265,8 +695,6 @@ export function ChatLauncher() {
             
             const enrichedChats = await Promise.all(chatsData.map(async (chat) => {
                 const otherId = chat.participants.find(p => p !== currentUser.uid) || '';
-                
-                // Get the other participant's name and avatar
                 const otherName = chat.participantNames?.[otherId] || 'User';
                 const unreadCount = chat.unreadCounts?.[currentUser.uid] || 0;
                 unreadSum += unreadCount;
@@ -302,12 +730,6 @@ export function ChatLauncher() {
                     variant: "destructive",
                     duration: 15000,
                 });
-            } else {
-                 toast({
-                    title: "Error loading chats",
-                    description: "Could not retrieve your conversations.",
-                    variant: "destructive",
-                });
             }
         });
 
@@ -329,12 +751,10 @@ export function ChatLauncher() {
         return () => unsubscribe();
     }, [selectedChat]);
     
-    // Auto-scroll to the latest message
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
 
-    // Listen for custom event to open a chat
     useEffect(() => {
         const handleOpenChat = async (event: Event) => {
             if (!currentUser || !db) return;
@@ -342,14 +762,11 @@ export function ChatLauncher() {
             const customEvent = event as CustomEvent<{ userId: string }>;
             const { userId } = customEvent.detail;
 
-            // Find if a conversation already exists in our state
             const existingChat = conversations.find(c => c.otherParticipant.id === userId);
 
             if (existingChat) {
                 handleSelectChat(existingChat);
             } else {
-                // If it doesn't exist, we create a "virtual" chat object to select it.
-                // The real document will be created when the first message is sent.
                 const otherUserDocRef = doc(db, "users", userId);
                 const otherUserDocSnap = await getDoc(otherUserDocRef);
 
@@ -400,18 +817,6 @@ export function ChatLauncher() {
 
     const getMicStream = async (): Promise<MediaStream | null> => {
         try {
-            if (navigator.permissions) {
-                const permissionStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName });
-                if (permissionStatus.state === 'denied') {
-                    toast({
-                        title: "Microphone Access Denied",
-                        description: "Please enable microphone permissions in your browser settings to make or receive calls.",
-                        variant: "destructive",
-                        duration: 10000
-                    });
-                    return null;
-                }
-            }
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
             return stream;
         } catch (error) {
@@ -439,10 +844,6 @@ export function ChatLauncher() {
 
     const startCall = async (chat: EnrichedChat) => {
         if (!currentUser || !db) return;
-        if (callState !== 'idle') {
-            toast({ title: "Cannot start call", description: "You are already in a call or one is incoming.", variant: "destructive" });
-            return;
-        }
         
         const stream = await getMicStream();
         if (!stream) {
@@ -452,17 +853,10 @@ export function ChatLauncher() {
         localStreamRef.current = stream;
         setCallState('calling');
         
-        const peer = new Peer({
-            initiator: true,
-            trickle: false,
-            stream: stream,
-            config: { iceServers }
-        });
+        const peer = new Peer({ initiator: true, trickle: false, stream: stream, config: { iceServers } });
         peerRef.current = peer;
 
-        peer.on('signal', (signal) => {
-            sendSignal(chat.otherParticipant.id, chat.id, signal);
-        });
+        peer.on('signal', (signal) => sendSignal(chat.otherParticipant.id, chat.id, signal));
         peer.on('stream', (remoteStream) => {
             setRemoteStream(remoteStream);
             setCallState('active');
@@ -486,28 +880,18 @@ export function ChatLauncher() {
         }
         localStreamRef.current = stream;
         
-        const peer = new Peer({
-            initiator: false,
-            trickle: false,
-            stream: stream,
-            config: { iceServers }
-        });
+        const peer = new Peer({ initiator: false, trickle: false, stream: stream, config: { iceServers } });
         peerRef.current = peer;
         
         const chatWithCaller = conversations.find(c => c.id === incomingCall.chatId);
         setSelectedChat(chatWithCaller || null);
         setCallState('active');
         
-        peer.on('signal', (signal) => {
-            sendSignal(incomingCall.fromId, incomingCall.chatId, signal);
-        });
-        peer.on('stream', (remoteStream) => {
-            setRemoteStream(remoteStream);
-        });
+        peer.on('signal', (signal) => sendSignal(incomingCall.fromId, incomingCall.chatId, signal));
+        peer.on('stream', (remoteStream) => setRemoteStream(remoteStream));
         peer.on('close', () => endCall(false));
         peer.on('error', (err) => {
              console.error('Peer error:', err);
-             toast({ title: "Call Error", description: "An error occurred during the call.", variant: "destructive" });
              endCall(false);
         });
         
@@ -543,10 +927,7 @@ export function ChatLauncher() {
         const chatDocRef = doc(db, "chats", selectedChat.id);
         
         try {
-             // Create a batch write
             const batch = writeBatch(db);
-
-            // Add the new message
             const newMessageRef = doc(collection(db, "chats", selectedChat.id, "messages"));
             batch.set(newMessageRef, {
                 text: newMessage,
@@ -554,7 +935,6 @@ export function ChatLauncher() {
                 timestamp: serverTimestamp(),
             });
 
-            // Update the chat document
             batch.set(chatDocRef, {
                     lastMessage: newMessage,
                     lastUpdate: serverTimestamp(),
@@ -566,9 +946,7 @@ export function ChatLauncher() {
                     }
                 }, { merge: true }
             );
-
             await batch.commit();
-
             setNewMessage('');
         } catch (error) {
             console.error("Error sending message:", error);
@@ -578,30 +956,20 @@ export function ChatLauncher() {
     
     const handleSelectChat = async (chat: EnrichedChat) => {
         if (!currentUser || !db) return;
-        
         setSelectedChat(chat);
-
         if (chat.unreadCount > 0) {
             try {
-                const chatDocRef = doc(db, "chats", chat.id);
-                // Use set with merge to avoid overwriting the whole document
-                await setDoc(chatDocRef, {
-                    unreadCounts: {
-                        [currentUser.uid]: 0
-                    }
+                await setDoc(doc(db, "chats", chat.id), {
+                    unreadCounts: { [currentUser.uid]: 0 }
                 }, { merge: true });
             } catch (error) {
                 console.warn("Could not mark chat as read", error);
             }
         }
     };
-
     
-    // Reset view when closing the sheet
     useEffect(() => {
-        if (!isOpen) {
-            setSelectedChat(null);
-        }
+        if (!isOpen) setSelectedChat(null);
     }, [isOpen]);
 
     if (!currentUser) return null;
@@ -609,7 +977,6 @@ export function ChatLauncher() {
     const CallDialog = () => {
         const otherParticipant = selectedChat?.otherParticipant;
         const caller = incomingCall;
-
         let name, avatar;
         if (callState === 'active' || callState === 'calling') {
             name = otherParticipant?.name;
@@ -622,10 +989,6 @@ export function ChatLauncher() {
         return (
             <Dialog open={callState === 'active' || callState === 'calling'}>
                 <DialogContent className="sm:max-w-xs" onInteractOutside={(e) => e.preventDefault()}>
-                    <DialogHeader>
-                         <DialogTitle className="sr-only">Voice call with {name}</DialogTitle>
-                        <DialogDescription className="sr-only">An active voice call. You can mute your microphone or end the call.</DialogDescription>
-                    </DialogHeader>
                     <div className="flex flex-col items-center justify-center gap-4 py-8">
                         <Avatar className="h-24 w-24 border-2 border-primary">
                             <AvatarImage src={avatar} alt={name}/>
@@ -666,9 +1029,6 @@ export function ChatLauncher() {
                             <AvatarFallback className="text-2xl">{incomingCall?.fromName?.[0]}</AvatarFallback>
                         </Avatar>
                         <AlertDialogTitle>{incomingCall?.fromName} is calling</AlertDialogTitle>
-                        <AlertDialogDescription>
-                            Do you want to accept the call?
-                        </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter className="justify-center">
                         <AlertDialogCancel asChild>
@@ -714,7 +1074,6 @@ export function ChatLauncher() {
                     </SheetHeader>
 
                     {selectedChat ? (
-                        // Message View
                         <>
                             <ScrollArea className="flex-1 px-4">
                                 <div className="space-y-4 py-4">
@@ -738,7 +1097,6 @@ export function ChatLauncher() {
                             </SheetFooter>
                         </>
                     ) : (
-                        // Conversation List View
                         <ScrollArea className="flex-1">
                             <div className="py-2">
                                 {conversations.length > 0 ? conversations.map(chat => (
@@ -777,4 +1135,14 @@ export function ChatLauncher() {
             </Sheet>
         </>
     );
+}
+
+
+export function ChatLauncher() {
+    return (
+        <FloatingRoomProvider>
+            <ChatLauncherUI />
+            <FloatingRoomPlayer />
+        </FloatingRoomProvider>
+    )
 }
