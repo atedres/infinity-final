@@ -125,6 +125,34 @@ const FloatingRoomContext = createContext<any>(null);
 export const useFloatingRoom = () => useContext(FloatingRoomContext);
 
 
+// Helper to set up all event handlers for a peer
+const setupPeerHandlers = (peer: PeerInstance, peerId: string, context: any) => {
+    const { setRemoteStreams, peersRef } = context;
+
+    peer.on('stream', (stream: MediaStream) => {
+        setRemoteStreams((prev: RemoteStream[]) => {
+            // Avoid adding duplicate streams
+            if (prev.some(s => s.peerId === peerId)) return prev;
+            return [...prev, { peerId, stream }];
+        });
+    });
+
+    peer.on('error', (err: Error) => {
+        console.error(`Peer connection error with ${peerId}:`, err);
+        if (peersRef.current[peerId]) {
+            peersRef.current[peerId].destroy();
+        }
+    });
+
+    peer.on('close', () => {
+        if (peersRef.current[peerId]) {
+            delete peersRef.current[peerId];
+        }
+        setRemoteStreams((prev: RemoteStream[]) => prev.filter(s => s.peerId !== peerId));
+    });
+};
+
+
 export function FloatingRoomProvider({ children }: { children: React.ReactNode }) {
     const { toast } = useToast();
     const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -208,8 +236,13 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
         Object.values(peersRef.current).forEach(peer => peer.destroy());
         peersRef.current = {};
 
-        const participantRef = doc(db, "audioRooms", activeRoomId, "participants", currentUser.uid);
-        await deleteDoc(participantRef);
+        try {
+            const participantRef = doc(db, "audioRooms", activeRoomId, "participants", currentUser.uid);
+            await deleteDoc(participantRef);
+        } catch (error) {
+            console.warn("Could not delete participant on leave, room might have ended.", error);
+        }
+
 
         setActiveRoomId(null);
         setRoomData(null);
@@ -238,7 +271,6 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
             return;
         }
         
-        // Add self to participants
         const roomDocRef = doc(db, "audioRooms", roomId);
         const roomSnap = await getDoc(roomDocRef);
         if (!roomSnap.exists()) {
@@ -275,10 +307,14 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
             setRoomData({ id: docSnap.id, ...docSnap.data() } as Room);
         }));
 
+        const contextForPeerHandlers = { setRemoteStreams, peersRef, toast };
+        
         // 2. Listen for participant changes to manage peers
         const participantsColRef = collection(db, "audioRooms", roomId, "participants");
         unsubscribes.push(onSnapshot(participantsColRef, (snapshot) => {
             const newParticipants = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Participant));
+            const currentPeerIds = Object.keys(peersRef.current);
+
             setParticipants(newParticipants);
 
             const participantIds = new Set(newParticipants.map(p => p.id));
@@ -286,34 +322,22 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
             // Connect to new participants
             newParticipants.forEach(p => {
                 if (p.id !== currentUser.uid && !peersRef.current[p.id] && localStreamRef.current) {
-                    // The user with the greater ID is the initiator to prevent "glare"
                     const isInitiator = currentUser.uid > p.id;
                     if (isInitiator) {
                         const peer = new Peer({ initiator: true, trickle: false, stream: localStreamRef.current, config: { iceServers } });
-                        peersRef.current[p.id] = peer;
                         
                         peer.on('signal', offerSignal => {
                             addDoc(collection(db, `audioRooms/${roomId}/signals`), { to: p.id, from: currentUser.uid, signal: JSON.stringify(offerSignal) });
                         });
                         
-                        peer.on('stream', stream => setRemoteStreams(prev => [...prev.filter(s => s.peerId !== p.id), { peerId: p.id, stream }]));
-                        
-                        peer.on('error', (err) => {
-                            console.error(`Peer connection error with ${p.id}:`, err);
-                            toast({ title: 'Connection Error', description: `Could not connect to ${p.name || 'a user'}.`, variant: 'destructive'});
-                            peersRef.current[p.id]?.destroy();
-                        });
-
-                        peer.on('close', () => {
-                            delete peersRef.current[p.id];
-                            setRemoteStreams(prev => prev.filter(s => s.peerId !== p.id));
-                        });
+                        setupPeerHandlers(peer, p.id, contextForPeerHandlers);
+                        peersRef.current[p.id] = peer;
                     }
                 }
             });
 
             // Clean up disconnected peers
-            Object.keys(peersRef.current).forEach(peerId => {
+            currentPeerIds.forEach(peerId => {
                 if (!participantIds.has(peerId)) {
                     peersRef.current[peerId]?.destroy();
                 }
@@ -327,35 +351,23 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
                 if (change.type === 'added') {
                     const data = change.doc.data();
                     const signal = JSON.parse(data.signal);
+                    const fromId = data.from;
                     
-                    // The non-initiator receives an 'offer' and creates a peer
                     if (signal.type === 'offer') {
-                        if (peersRef.current[data.from] || !localStreamRef.current) return;
+                        if (peersRef.current[fromId] || !localStreamRef.current) return;
                         
                         const peer = new Peer({ initiator: false, trickle: false, stream: localStreamRef.current, config: { iceServers } });
-                        peersRef.current[data.from] = peer;
-
-                        peer.on('signal', answerSignal => {
-                           addDoc(collection(db, `audioRooms/${roomId}/signals`), { to: data.from, from: currentUser.uid, signal: JSON.stringify(answerSignal) });
-                        });
-
-                        peer.on('stream', stream => setRemoteStreams(prev => [...prev.filter(s => s.peerId !== data.from), { peerId: data.from, stream }]));
-
-                        peer.on('error', (err) => {
-                            console.error(`Peer connection error with ${data.from}:`, err);
-                            toast({ title: 'Connection Error', description: `Could not connect to a user.`, variant: 'destructive'});
-                            peersRef.current[data.from]?.destroy();
-                        });
-
-                        peer.on('close', () => {
-                            delete peersRef.current[data.from];
-                            setRemoteStreams(prev => prev.filter(s => s.peerId !== data.from));
-                        });
                         
+                        peer.on('signal', answerSignal => {
+                           addDoc(collection(db, `audioRooms/${roomId}/signals`), { to: fromId, from: currentUser.uid, signal: JSON.stringify(answerSignal) });
+                        });
+
+                        setupPeerHandlers(peer, fromId, contextForPeerHandlers);
+                        peersRef.current[fromId] = peer;
                         peer.signal(signal);
-                    // The initiator receives the 'answer' to complete the connection
+
                     } else if (signal.type === 'answer') {
-                        const peer = peersRef.current[data.from];
+                        const peer = peersRef.current[fromId];
                         if (peer && !peer.destroyed) {
                             peer.signal(signal);
                         }
@@ -413,16 +425,11 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
             toast({ title: "Permission Denied", description: "Only a moderator can end the room.", variant: "destructive" });
             return;
         }
-
-        // Instead of deleting the room, we can just clear participants to end it.
-        const participantsColRef = collection(db, "audioRooms", activeRoomId, "participants");
-        const participantsSnap = await getDocs(participantsColRef);
-        const batch = writeBatch(db);
-        participantsSnap.forEach(doc => batch.delete(doc.ref));
-        await batch.commit();
-
+        
+        // Delete the room document, which will trigger cleanup for all participants
         await deleteDoc(doc(db, "audioRooms", activeRoomId));
         await leaveRoom();
+
     }, [activeRoomId, currentUser, roomData, participants, leaveRoom, db, toast]);
     
     const showFloatingPlayer = useCallback(() => {
@@ -437,7 +444,6 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
         await updateDoc(doc(db, "audioRooms", activeRoomId, "participants", currentUser.uid), { isMuted: newMutedState });
     }, [isMuted, activeRoomId, currentUser]);
 
-    // ... Other actions (requestToSpeak, manageRequest, etc.) converted to use activeRoomId and currentUser
      const requestToSpeak = useCallback(async () => {
         if (!currentUser || !db || !activeRoomId) return;
         await setDoc(doc(db, "audioRooms", activeRoomId, "requests", currentUser.uid), { name: currentUser.displayName, avatar: currentUser.photoURL });
@@ -474,7 +480,6 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
         if (!db || !activeRoomId || !currentUser) return;
         const batch = writeBatch(db);
         batch.set(doc(db, "audioRooms", activeRoomId, "bannedUsers", targetId), { bannedAt: serverTimestamp(), bannedBy: currentUser.uid });
-        // Instead of a "kicked" flag, we just delete them. The ban list will prevent re-entry.
         batch.delete(doc(db, "audioRooms", activeRoomId, "participants", targetId));
         await batch.commit();
         toast({ title: "User Banned" });
@@ -508,7 +513,7 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
 
     const unpinLink = useCallback(async () => {
         if (!db || !activeRoomId) return;
-        await updateDoc(doc(db, "audioRooms", activeRoomId), { pinnedLink: "" });
+        await updateDoc(doc(db, "audioRooms", activeRoomId), { pinnedLink: deleteField() });
         toast({ title: "Link Unpinned" });
     }, [activeRoomId, toast]);
 
