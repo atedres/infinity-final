@@ -161,6 +161,9 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
 
     const getMicStream = useCallback(async () => {
         try {
+            if (localStreamRef.current) {
+                return localStreamRef.current;
+            }
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
             localStreamRef.current = stream;
             return stream;
@@ -235,23 +238,13 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
             return;
         }
         
-        // Setup Firestore listeners and WebRTC logic
-        const roomDocRef = doc(db, "audioRooms", roomId);
-        
-        const unsubRoom = onSnapshot(roomDocRef, (docSnap) => {
-            if (!docSnap.exists()) {
-                setRoomData(null);
-                setIsRoomLoading(false);
-                return;
-            }
-            setRoomData({ id: docSnap.id, ...docSnap.data() } as Room);
-        });
-
         // Add self to participants
+        const roomDocRef = doc(db, "audioRooms", roomId);
         const roomSnap = await getDoc(roomDocRef);
         if (!roomSnap.exists()) {
-            setIsRoomLoading(false);
-            return;
+             leaveRoom();
+             setIsRoomLoading(false);
+             return;
         }
         const initialRoomData = roomSnap.data() as Room;
         const myRole = initialRoomData.creatorId === currentUser.uid ? 'creator' : (initialRoomData.roles?.[currentUser.uid] || 'listener');
@@ -263,100 +256,108 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
             avatar: currentUser.photoURL,
             isMuted: initialMute,
             role: myRole,
-        });
+        }, { merge: true });
         setIsMuted(initialMute);
-        if (!initialMute) {
-            localStreamRef.current?.getAudioTracks().forEach(t => t.enabled = true);
-        } else {
-             localStreamRef.current?.getAudioTracks().forEach(t => t.enabled = false);
+
+        if (localStreamRef.current) {
+            localStreamRef.current.getAudioTracks().forEach(t => t.enabled = !initialMute);
         }
 
+        const unsubscribes: (() => void)[] = [];
+
+        // 1. Listen for room document changes
+        unsubscribes.push(onSnapshot(roomDocRef, (docSnap) => {
+            if (!docSnap.exists()) {
+                setRoomData(null);
+                leaveRoom();
+                return;
+            }
+            setRoomData({ id: docSnap.id, ...docSnap.data() } as Room);
+        }));
+
+        // 2. Listen for participant changes to manage peers
         const participantsColRef = collection(db, "audioRooms", roomId, "participants");
-        const unsubParticipants = onSnapshot(participantsColRef, snapshot => {
+        unsubscribes.push(onSnapshot(participantsColRef, (snapshot) => {
             const newParticipants = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Participant));
             setParticipants(newParticipants);
-            
-            // Peer connection logic with glare handling
+
+            const participantIds = new Set(newParticipants.map(p => p.id));
+
+            // Connect to new participants
             newParticipants.forEach(p => {
                 if (p.id !== currentUser.uid && !peersRef.current[p.id] && localStreamRef.current) {
-                    // Determine who initiates the connection to avoid "glare".
-                    // The user with the alphabetically greater UID will initiate.
                     const shouldInitiate = currentUser.uid > p.id;
-
                     if (shouldInitiate) {
-                        const peer = new Peer({ initiator: true, trickle: false, stream: localStreamRef.current, config: { iceServers }});
-                        peer.on('signal', async signal => {
-                           await addDoc(collection(db, `audioRooms/${roomId}/signals`), { to: p.id, from: currentUser.uid, signal: JSON.stringify(signal) });
+                        const peer = new Peer({ initiator: true, trickle: false, stream: localStreamRef.current, config: { iceServers } });
+                        peersRef.current[p.id] = peer;
+                        
+                        peer.on('signal', offerSignal => {
+                            addDoc(collection(db, `audioRooms/${roomId}/signals`), { to: p.id, from: currentUser.uid, signal: JSON.stringify(offerSignal) });
                         });
                         peer.on('stream', stream => setRemoteStreams(prev => [...prev.filter(s => s.peerId !== p.id), { peerId: p.id, stream }]));
                         peer.on('close', () => {
                             delete peersRef.current[p.id];
                             setRemoteStreams(prev => prev.filter(s => s.peerId !== p.id));
                         });
-                        peersRef.current[p.id] = peer;
                     }
                 }
             });
 
-            // Clean up peers for participants who have left
-            const pIds = new Set(newParticipants.map(p => p.id));
+            // Clean up disconnected peers
             Object.keys(peersRef.current).forEach(peerId => {
-                if (!pIds.has(peerId)) {
-                    peersRef.current[peerId].destroy();
+                if (!participantIds.has(peerId)) {
+                    peersRef.current[peerId]?.destroy();
                     delete peersRef.current[peerId];
                     setRemoteStreams(prev => prev.filter(s => s.peerId !== peerId));
                 }
             });
-        });
-        
+        }));
+
+        // 3. Listen for incoming WebRTC signals
         const signalsQuery = query(collection(db, `audioRooms/${roomId}/signals`), where("to", "==", currentUser.uid));
-        const unsubSignals = onSnapshot(signalsQuery, snapshot => {
-            snapshot.docChanges().forEach(async change => {
+        unsubscribes.push(onSnapshot(signalsQuery, (snapshot) => {
+            snapshot.docChanges().forEach(async (change) => {
                 if (change.type === 'added') {
                     const data = change.doc.data();
-                    const peer = peersRef.current[data.from];
-                    if (peer && !peer.destroyed) {
-                        peer.signal(JSON.parse(data.signal));
-                    } else if (!peer && localStreamRef.current) {
-                        const newPeer = new Peer({ initiator: false, trickle: false, stream: localStreamRef.current, config: { iceServers }});
-                        newPeer.on('signal', async signal => {
-                            await addDoc(collection(db, `audioRooms/${roomId}/signals`), { to: data.from, from: currentUser.uid, signal: JSON.stringify(signal) });
+                    const signal = JSON.parse(data.signal);
+
+                    if (signal.type === 'offer') {
+                        if (peersRef.current[data.from] || !localStreamRef.current) return;
+                        
+                        const peer = new Peer({ initiator: false, trickle: false, stream: localStreamRef.current, config: { iceServers } });
+                        peersRef.current[data.from] = peer;
+
+                        peer.on('signal', answerSignal => {
+                           addDoc(collection(db, `audioRooms/${roomId}/signals`), { to: data.from, from: currentUser.uid, signal: JSON.stringify(answerSignal) });
                         });
-                        newPeer.on('stream', stream => setRemoteStreams(prev => [...prev.filter(s => s.peerId !== data.from), { peerId: data.from, stream }]));
-                        newPeer.on('close', () => {
+                        peer.on('stream', stream => setRemoteStreams(prev => [...prev.filter(s => s.peerId !== data.from), { peerId: data.from, stream }]));
+                        peer.on('close', () => {
                             delete peersRef.current[data.from];
                             setRemoteStreams(prev => prev.filter(s => s.peerId !== data.from));
                         });
-                        newPeer.signal(JSON.parse(data.signal));
-                        peersRef.current[data.from] = newPeer;
+                        
+                        peer.signal(signal);
+                    } else if (signal.type === 'answer') {
+                        const peer = peersRef.current[data.from];
+                        if (peer && !peer.destroyed) {
+                            peer.signal(signal);
+                        }
                     }
                     await deleteDoc(change.doc.ref);
                 }
             });
-        });
+        }));
 
-        // Other listeners (requests, chat, etc.)
-        const requestsRef = collection(db, "audioRooms", roomId, "requests");
-        const unsubRequests = onSnapshot(requestsRef, snapshot => setSpeakingRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SpeakRequest))));
-        const chatRef = query(collection(db, "audioRooms", roomId, "chatMessages"), orderBy("createdAt", "asc"));
-        const unsubChat = onSnapshot(chatRef, snapshot => setChatMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as RoomChatMessage)));
-        const inviteRef = doc(db, "audioRooms", roomId, "invitations", currentUser.uid);
-        const unsubInvite = onSnapshot(inviteRef, doc => setSpeakerInvitation(doc.exists() ? doc.data() as SpeakerInvitation : null));
+        // 4. Other listeners (requests, chat, invites)
+        unsubscribes.push(onSnapshot(collection(db, "audioRooms", roomId, "requests"), s => setSpeakingRequests(s.docs.map(d => ({ id: d.id, ...d.data() } as SpeakRequest)))));
+        unsubscribes.push(onSnapshot(query(collection(db, "audioRooms", roomId, "chatMessages"), orderBy("createdAt", "asc")), s => setChatMessages(s.docs.map(d => ({ id: d.id, ...d.data() } as RoomChatMessage)))));
+        unsubscribes.push(onSnapshot(doc(db, "audioRooms", roomId, "invitations", currentUser.uid), d => setSpeakerInvitation(d.exists() ? d.data() as SpeakerInvitation : null)));
 
         const myRequestRef = doc(db, "audioRooms", roomId, "requests", currentUser.uid);
-        const myRequestSnap = await getDoc(myRequestRef);
-        setHasRequested(myRequestSnap.exists());
+        getDoc(myRequestRef).then(snap => setHasRequested(snap.exists()));
         
         setIsRoomLoading(false);
-
-        cleanupRef.current = () => {
-            unsubRoom();
-            unsubParticipants();
-            unsubSignals();
-            unsubRequests();
-            unsubChat();
-            unsubInvite();
-        };
+        cleanupRef.current = () => unsubscribes.forEach(unsub => unsub());
 
     }, [currentUser, activeRoomId, toast, getMicStream, leaveRoom]);
     
@@ -388,11 +389,11 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
     const endRoom = useCallback(async () => {
         if (!activeRoomId || !currentUser || !db || !roomData) return;
         
-        const isCreator = roomData.creatorId === currentUser.uid;
-        const isModerator = roomData.roles?.[currentUser.uid] === 'moderator';
+        const myParticipantData = participants.find(p => p.id === currentUser.uid);
+        const isModerator = myParticipantData?.role === 'creator' || myParticipantData?.role === 'moderator';
 
-        if (!isCreator && !isModerator) {
-            toast({ title: "Permission Denied", description: "Only the creator or a moderator can end the room.", variant: "destructive" });
+        if (!isModerator) {
+            toast({ title: "Permission Denied", description: "Only a moderator can end the room.", variant: "destructive" });
             return;
         }
 
@@ -405,7 +406,7 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
 
         await deleteDoc(doc(db, "audioRooms", activeRoomId));
         await leaveRoom();
-    }, [activeRoomId, currentUser, roomData, leaveRoom, db, toast]);
+    }, [activeRoomId, currentUser, roomData, participants, leaveRoom, db, toast]);
     
     const showFloatingPlayer = useCallback(() => {
         if (activeRoomId) setIsFloating(true);
@@ -564,16 +565,16 @@ function RoomAudioRenderer() {
     if (!activeRoomId || !remoteStreams) return null;
 
     return (
-        <>
+        <div style={{ display: 'none' }}>
             {remoteStreams.map((remote: RemoteStream) => (
                 <AudioPlayer key={remote.peerId} stream={remote.stream} />
             ))}
-        </>
+        </div>
     );
 }
 
 function FloatingRoomPlayer() {
-    const { isFloating, roomData, leaveRoom, isMuted, toggleMute, participants, currentUser } = useFloatingRoom();
+    const { activeRoomId, isFloating, roomData, leaveRoom, isMuted, toggleMute, participants, currentUser } = useFloatingRoom();
 
     if (!isFloating || !roomData || !currentUser) {
         return null;
@@ -586,7 +587,7 @@ function FloatingRoomPlayer() {
         <div className="fixed bottom-6 right-24 z-50">
             <Card className="w-80 shadow-2xl">
                 <CardContent className="p-3 flex items-center justify-between gap-2">
-                     <Link href={`/sound-sphere/${roomData.id}`} className="flex-1 truncate pr-2 cursor-pointer group">
+                     <Link href={`/sound-sphere/${activeRoomId}`} className="flex-1 truncate pr-2 cursor-pointer group">
                         <p className="font-semibold truncate group-hover:underline">{roomData.title}</p>
                         <p className="text-sm text-muted-foreground">Click to re-join</p>
                     </Link>
