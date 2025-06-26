@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Textarea } from '@/components/ui/textarea';
@@ -61,6 +62,12 @@ interface ChatMessage {
     senderAvatar: string;
     createdAt: Timestamp;
 }
+
+interface SpeakerInvitation {
+    inviterId: string;
+    inviterName: string;
+}
+
 
 const AudioPlayer = ({ stream }: { stream: MediaStream }) => {
     const ref = useRef<HTMLAudioElement>(null);
@@ -139,6 +146,9 @@ export default function AudioRoomPage() {
     const chatUnsubscribeRef = useRef<() => void | null>(null);
     const chatMessagesEndRef = useRef<HTMLDivElement>(null);
 
+    // Invitation State
+    const [speakerInvitation, setSpeakerInvitation] = useState<SpeakerInvitation | null>(null);
+
 
     useEffect(() => {
         const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
@@ -210,6 +220,9 @@ export default function AudioRoomPage() {
         let unsubSignals: () => void = () => {};
         let unsubRoom: () => void = () => {};
         let unsubRequests: () => void = () => {};
+        let unsubInvitation: () => void = () => {};
+        let unsubMyParticipant: () => void = () => {};
+
 
         const cleanup = async () => {
             console.log(`[CLEANUP] Cleaning up for user ${myId} in room ${roomId}`);
@@ -224,6 +237,9 @@ export default function AudioRoomPage() {
             unsubSignals();
             unsubRoom();
             unsubRequests();
+            unsubInvitation();
+            unsubMyParticipant();
+
             
             if (!db) return;
             const participantRef = doc(db, "audioRooms", roomId, "participants", myId);
@@ -447,6 +463,27 @@ export default function AudioRoomPage() {
             if (requestDoc.exists()) {
                 setHasRequested(true);
             }
+            
+            const invitationRef = doc(db, "audioRooms", roomId, "invitations", myId);
+            unsubInvitation = onSnapshot(invitationRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    setSpeakerInvitation(docSnap.data() as SpeakerInvitation);
+                } else {
+                    setSpeakerInvitation(null);
+                }
+            });
+
+            const myParticipantRef = doc(db, "audioRooms", roomId, "participants", myId);
+            unsubMyParticipant = onSnapshot(myParticipantRef, (docSnap) => {
+                 if (docSnap.exists()) {
+                    const myData = docSnap.data();
+                    if (myData.kicked) {
+                        toast({ title: "You have been removed from the room." });
+                        router.push('/sound-sphere'); // This will trigger cleanup
+                    }
+                }
+            });
+
         };
 
         setupRoom();
@@ -787,8 +824,22 @@ export default function AudioRoomPage() {
     };
 
     const handleChangeRole = async (targetId: string, newRole: 'moderator' | 'speaker' | 'listener') => {
-        if (!db || !isModerator) return;
+        if (!db || !isModerator || !currentUser) return;
+        
+        // Invite a listener to speak
+        const targetParticipantDoc = await getDoc(doc(db, "audioRooms", roomId, "participants", targetId));
+        if (newRole === 'speaker' && targetParticipantDoc.exists() && targetParticipantDoc.data().role === 'listener') {
+            const invitationRef = doc(db, "audioRooms", roomId, "invitations", targetId);
+            await setDoc(invitationRef, {
+                inviterId: currentUser.uid,
+                inviterName: currentUser.displayName,
+            });
+            toast({ title: "Invitation Sent", description: "The user has been invited to speak." });
+            setSelectedUser(null);
+            return;
+        }
 
+        // Handle other role changes directly
         const roomRef = doc(db, "audioRooms", roomId);
         const participantRef = doc(db, "audioRooms", roomId, "participants", targetId);
 
@@ -809,6 +860,57 @@ export default function AudioRoomPage() {
         } catch (error) {
             console.error("Error changing role:", error);
             toast({ title: "Error", description: "Could not update user role.", variant: "destructive" });
+        }
+    };
+    
+    const handleAcceptInvite = async () => {
+        if (!db || !currentUser) return;
+        try {
+            const batch = writeBatch(db);
+            const participantRef = doc(db, "audioRooms", roomId, "participants", currentUser.uid);
+            const roomRef = doc(db, "audioRooms", roomId);
+            const invitationRef = doc(db, "audioRooms", roomId, "invitations", currentUser.uid);
+            
+            batch.update(participantRef, { role: 'speaker', isMuted: false });
+            batch.update(roomRef, { [`roles.${currentUser.uid}`]: 'speaker' });
+            batch.delete(invitationRef);
+
+            await batch.commit();
+            setIsMuted(false);
+            if (localStreamRef.current) {
+                localStreamRef.current.getAudioTracks().forEach(track => track.enabled = true);
+            }
+            toast({ title: "You are now a speaker!" });
+        } catch (error) {
+            console.error("Error accepting invite:", error);
+            toast({ title: "Error", description: "Could not accept the invitation.", variant: "destructive" });
+        } finally {
+            setSpeakerInvitation(null);
+        }
+    };
+
+    const handleDeclineInvite = async () => {
+        if (!db || !currentUser) return;
+        try {
+            const invitationRef = doc(db, "audioRooms", roomId, "invitations", currentUser.uid);
+            await deleteDoc(invitationRef);
+        } catch (error) {
+            console.error("Error declining invite:", error);
+        } finally {
+            setSpeakerInvitation(null);
+        }
+    };
+
+    const handleRemoveUser = async (targetId: string) => {
+        if (!db || !isModerator) return;
+        try {
+            const participantRef = doc(db, "audioRooms", roomId, "participants", targetId);
+            await updateDoc(participantRef, { kicked: true });
+            toast({ title: "User Removed", description: "The user has been removed from the room." });
+            setSelectedUser(null);
+        } catch (error) {
+            console.error("Error removing user:", error);
+            toast({ title: "Error", description: "Could not remove the user.", variant: "destructive" });
         }
     };
 
@@ -833,12 +935,13 @@ export default function AudioRoomPage() {
             <button
                 key={p.id}
                 onClick={() => {
-                    if (p.id !== currentUser.uid) {
+                    if (p.id === currentUser.uid) {
+                        router.push(`/profile/${p.id}`);
+                    } else {
                         setSelectedUser(p);
                     }
                 }}
-                disabled={p.id === currentUser.uid}
-                className="relative flex flex-col items-center gap-2 cursor-pointer transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-70"
+                className="relative flex flex-col items-center gap-2 cursor-pointer transition-transform hover:scale-105"
             >
                 <div className="relative">
                     <Avatar className={cn(
@@ -874,6 +977,22 @@ export default function AudioRoomPage() {
               <canvas ref={pipCanvasRef} width="320" height="180"></canvas>
               <video ref={pipVideoRef} muted playsInline></video>
             </div>
+            
+            <AlertDialog open={!!speakerInvitation}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>{speakerInvitation?.inviterName} has invited you to speak!</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Would you like to join the speakers on stage?
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel onClick={handleDeclineInvite}>Decline</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleAcceptInvite}>Accept</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
 
             <div className="mx-auto max-w-4xl space-y-8">
                  <div className="text-left space-y-2">
@@ -1030,7 +1149,7 @@ export default function AudioRoomPage() {
                                     </div>
                                     {canManageSelectedUser && selectedUser.role !== 'creator' && <div className="border-t pt-4 space-y-2">
                                         <p className="text-sm font-medium text-center">Moderator Actions</p>
-                                        <div className="flex justify-center gap-2">
+                                        <div className="flex flex-wrap justify-center gap-2">
                                             {selectedUser.role === 'listener' && <Button size="sm" onClick={() => handleChangeRole(selectedUser.id, 'speaker')}>Invite to Speak</Button>}
                                             {selectedUser.role === 'speaker' && (
                                                 <>
@@ -1044,6 +1163,9 @@ export default function AudioRoomPage() {
                                                     <Button size="sm" variant="outline" onClick={() => handleChangeRole(selectedUser.id, 'listener')}>Move to Listeners</Button>
                                                 </>
                                             )}
+                                             <Button size="sm" variant="destructive" onClick={() => handleRemoveUser(selectedUser.id)}>
+                                                <UserX className="mr-2 h-4 w-4" /> Remove from Room
+                                            </Button>
                                         </div>
                                     </div>}
                                 </div>
@@ -1149,3 +1271,4 @@ export default function AudioRoomPage() {
         </SubpageLayout>
     );
 }
+
