@@ -124,7 +124,7 @@ const FloatingRoomContext = createContext<any>(null);
 export const useFloatingRoom = () => useContext(FloatingRoomContext);
 
 
-function FloatingRoomProvider({ children }: { children: React.ReactNode }) {
+export function FloatingRoomProvider({ children }: { children: React.ReactNode }) {
     const { toast } = useToast();
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
@@ -482,6 +482,7 @@ function FloatingRoomProvider({ children }: { children: React.ReactNode }) {
         storage,
         isRoomLoading,
         remoteStreams,
+        isFloating,
     };
 
     return (
@@ -1140,9 +1141,9 @@ function ChatLauncherUI() {
 
 export function ChatLauncher() {
     return (
-        <FloatingRoomProvider>
+        <>
             <ChatLauncherUI />
             <FloatingRoomPlayer />
-        </FloatingRoomProvider>
+        </>
     )
 }
