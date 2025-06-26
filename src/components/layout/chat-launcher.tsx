@@ -193,6 +193,28 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
         await batch.commit();
         toast({ title: "Role Updated" });
     }, [activeRoomId, currentUser, toast]);
+    
+    const leaveRoom = useCallback(async () => {
+        if (!activeRoomId || !currentUser || !db) return;
+
+        cleanupRef.current?.();
+        cleanupRef.current = undefined;
+
+        localStreamRef.current?.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
+        Object.values(peersRef.current).forEach(peer => peer.destroy());
+        peersRef.current = {};
+
+        const participantRef = doc(db, "audioRooms", activeRoomId, "participants", currentUser.uid);
+        await deleteDoc(participantRef);
+
+        setActiveRoomId(null);
+        setRoomData(null);
+        setParticipants([]);
+        setRemoteStreams([]);
+        setIsFloating(false);
+    }, [activeRoomId, currentUser]);
+
 
     const joinRoom = useCallback(async (roomId: string) => {
         if (!currentUser || !db) return;
@@ -253,21 +275,30 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
         const unsubParticipants = onSnapshot(participantsColRef, snapshot => {
             const newParticipants = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Participant));
             setParticipants(newParticipants);
-            // Peer connection logic
+            
+            // Peer connection logic with glare handling
             newParticipants.forEach(p => {
                 if (p.id !== currentUser.uid && !peersRef.current[p.id] && localStreamRef.current) {
-                    const peer = new Peer({ initiator: true, trickle: false, stream: localStreamRef.current, config: { iceServers }});
-                    peer.on('signal', async signal => {
-                       await addDoc(collection(db, `audioRooms/${roomId}/signals`), { to: p.id, from: currentUser.uid, signal: JSON.stringify(signal) });
-                    });
-                    peer.on('stream', stream => setRemoteStreams(prev => [...prev.filter(s => s.peerId !== p.id), { peerId: p.id, stream }]));
-                    peer.on('close', () => {
-                        delete peersRef.current[p.id];
-                        setRemoteStreams(prev => prev.filter(s => s.peerId !== p.id));
-                    });
-                    peersRef.current[p.id] = peer;
+                    // Determine who initiates the connection to avoid "glare".
+                    // The user with the alphabetically greater UID will initiate.
+                    const shouldInitiate = currentUser.uid > p.id;
+
+                    if (shouldInitiate) {
+                        const peer = new Peer({ initiator: true, trickle: false, stream: localStreamRef.current, config: { iceServers }});
+                        peer.on('signal', async signal => {
+                           await addDoc(collection(db, `audioRooms/${roomId}/signals`), { to: p.id, from: currentUser.uid, signal: JSON.stringify(signal) });
+                        });
+                        peer.on('stream', stream => setRemoteStreams(prev => [...prev.filter(s => s.peerId !== p.id), { peerId: p.id, stream }]));
+                        peer.on('close', () => {
+                            delete peersRef.current[p.id];
+                            setRemoteStreams(prev => prev.filter(s => s.peerId !== p.id));
+                        });
+                        peersRef.current[p.id] = peer;
+                    }
                 }
             });
+
+            // Clean up peers for participants who have left
             const pIds = new Set(newParticipants.map(p => p.id));
             Object.keys(peersRef.current).forEach(peerId => {
                 if (!pIds.has(peerId)) {
@@ -276,7 +307,6 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
                     setRemoteStreams(prev => prev.filter(s => s.peerId !== peerId));
                 }
             });
-
         });
         
         const signalsQuery = query(collection(db, `audioRooms/${roomId}/signals`), where("to", "==", currentUser.uid));
@@ -328,7 +358,7 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
             unsubInvite();
         };
 
-    }, [currentUser, activeRoomId, toast, getMicStream]);
+    }, [currentUser, activeRoomId, toast, getMicStream, leaveRoom]);
     
     // Auto-moderator promotion logic
     useEffect(() => {
@@ -354,26 +384,6 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
         autoPromote();
       }, [participants, activeRoomId, db, roomData, changeRole, toast]);
 
-    const leaveRoom = useCallback(async () => {
-        if (!activeRoomId || !currentUser || !db) return;
-
-        cleanupRef.current?.();
-        cleanupRef.current = undefined;
-
-        localStreamRef.current?.getTracks().forEach(track => track.stop());
-        localStreamRef.current = null;
-        Object.values(peersRef.current).forEach(peer => peer.destroy());
-        peersRef.current = {};
-
-        const participantRef = doc(db, "audioRooms", activeRoomId, "participants", currentUser.uid);
-        await deleteDoc(participantRef);
-
-        setActiveRoomId(null);
-        setRoomData(null);
-        setParticipants([]);
-        setRemoteStreams([]);
-        setIsFloating(false);
-    }, [activeRoomId, currentUser]);
     
     const endRoom = useCallback(async () => {
         if (!activeRoomId || !currentUser || !db || !roomData) return;
