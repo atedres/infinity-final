@@ -7,7 +7,7 @@ import { SubpageLayout } from "@/components/layout/subpage-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Textarea } from '@/components/ui/textarea';
@@ -151,17 +151,8 @@ export default function AudioRoomPage() {
             }
         });
         
-        const handleBeforeUnload = () => {
-           if (cleanupRef.current) {
-               cleanupRef.current();
-           }
-        };
-        
-        window.addEventListener('beforeunload', handleBeforeUnload);
-
         return () => {
              unsubscribeAuth();
-             window.removeEventListener('beforeunload', handleBeforeUnload);
              if (cleanupRef.current) {
                 cleanupRef.current();
              }
