@@ -328,11 +328,19 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
     }, [activeRoomId, currentUser]);
     
     const endRoom = useCallback(async () => {
-        if (!activeRoomId || !currentUser || !db) return;
-        if (roomData?.creatorId !== currentUser.uid) return;
+        if (!activeRoomId || !currentUser || !db || !roomData) return;
+        
+        const isCreator = roomData.creatorId === currentUser.uid;
+        const isModerator = roomData.roles?.[currentUser.uid] === 'moderator';
+
+        if (!isCreator && !isModerator) {
+            toast({ title: "Permission Denied", description: "Only the creator or a moderator can end the room.", variant: "destructive" });
+            return;
+        }
+
         await deleteDoc(doc(db, "audioRooms", activeRoomId));
         await leaveRoom();
-    }, [activeRoomId, currentUser, roomData, leaveRoom]);
+    }, [activeRoomId, currentUser, roomData, leaveRoom, db, toast]);
     
     const showFloatingPlayer = useCallback(() => {
         if (activeRoomId) setIsFloating(true);
@@ -1165,4 +1173,3 @@ export function ChatLauncher() {
         </>
     )
 }
-

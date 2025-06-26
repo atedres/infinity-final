@@ -696,7 +696,7 @@ export default function AudioRoomPage() {
                         <LogOut className="mr-2 h-5 w-5" />
                         Leave
                     </Button>
-                    {isModerator && myRole === 'creator' && (
+                    {isModerator && (
                         <Button variant="destructive" onClick={handleEndRoomAndRedirect} className="sm:w-auto w-full">
                             <XCircle className="mr-2 h-5 w-5" />
                             End Room
@@ -836,5 +836,3 @@ export default function AudioRoomPage() {
         </SubpageLayout>
     );
 }
-
-    
