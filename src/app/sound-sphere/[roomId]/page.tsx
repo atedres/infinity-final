@@ -351,6 +351,19 @@ export default function AudioRoomPage() {
         cleanupRef.current = cleanup;
 
         const setupRoom = async () => {
+             // Ban check
+            const banRef = doc(db, "audioRooms", roomId, "bannedUsers", myId);
+            const banSnap = await getDoc(banRef);
+            if (banSnap.exists()) {
+                toast({
+                    title: "Access Denied",
+                    description: "You have been banned from this room.",
+                    variant: "destructive",
+                });
+                router.push('/sound-sphere');
+                return;
+            }
+
             try {
                 if (navigator.permissions) {
                     const permissionStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName });
@@ -996,15 +1009,28 @@ export default function AudioRoomPage() {
     const handleRemoveUser = async (targetId: string) => {
         const myData = participants.find(p => p.id === currentUser?.uid);
         const isModerator = myData?.role === 'creator' || myData?.role === 'moderator';
-        if (!db || !isModerator) return;
+        if (!db || !isModerator || !currentUser) return;
         try {
+            const batch = writeBatch(db);
+            
+            // Ban the user from the room
+            const banRef = doc(db, "audioRooms", roomId, "bannedUsers", targetId);
+            batch.set(banRef, {
+                bannedAt: serverTimestamp(),
+                bannedBy: currentUser.uid,
+            });
+
+            // Kick the user from the current session
             const participantRef = doc(db, "audioRooms", roomId, "participants", targetId);
-            await updateDoc(participantRef, { kicked: true });
-            toast({ title: "User Removed", description: "The user has been removed from the room." });
+            batch.update(participantRef, { kicked: true });
+            
+            await batch.commit();
+
+            toast({ title: "User Banned", description: "The user has been removed and banned from this room." });
             setSelectedUser(null);
         } catch (error) {
-            console.error("Error removing user:", error);
-            toast({ title: "Error", description: "Could not remove the user.", variant: "destructive" });
+            console.error("Error banning user:", error);
+            toast({ title: "Error", description: "Could not ban the user.", variant: "destructive" });
         }
     };
     
@@ -1407,7 +1433,7 @@ export default function AudioRoomPage() {
                                                 </>
                                             )}
                                              <Button size="sm" variant="destructive" onClick={() => handleRemoveUser(selectedUser.id)}>
-                                                <UserX className="mr-2 h-4 w-4" /> Remove from Room
+                                                <UserX className="mr-2 h-4 w-4" /> Ban from Room
                                             </Button>
                                         </div>
                                     </div>}
