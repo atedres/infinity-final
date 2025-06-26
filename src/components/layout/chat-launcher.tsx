@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, createContext, useContext, useCallback } from 'react';
+import Link from 'next/link';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, query, where, onSnapshot, orderBy, doc, addDoc, serverTimestamp, setDoc, getDoc, updateDoc, increment, writeBatch, deleteDoc, Timestamp, getDocs, deleteField } from 'firebase/firestore';
 import Peer from 'simple-peer';
@@ -493,11 +494,14 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
 }
 
 function FloatingRoomPlayer() {
-    const { isFloating, roomData, leaveRoom, remoteStreams } = useFloatingRoom();
+    const { isFloating, roomData, leaveRoom, remoteStreams, isMuted, toggleMute, participants, currentUser } = useFloatingRoom();
 
-    if (!isFloating || !roomData) {
+    if (!isFloating || !roomData || !currentUser) {
         return null;
     }
+
+    const myParticipantData = participants.find(p => p.id === currentUser.uid);
+    const canSpeak = myParticipantData?.role === 'creator' || myParticipantData?.role === 'moderator' || myParticipantData?.role === 'speaker';
 
     return (
         <>
@@ -506,14 +510,28 @@ function FloatingRoomPlayer() {
             ))}
             <div className="fixed bottom-6 right-24 z-50">
                 <Card className="w-80 shadow-2xl">
-                    <CardContent className="p-3 flex items-center justify-between">
-                        <div className="flex-1 truncate pr-2">
-                            <p className="font-semibold truncate">{roomData.title}</p>
-                            <p className="text-sm text-muted-foreground">Listening...</p>
+                    <CardContent className="p-3 flex items-center justify-between gap-2">
+                         <Link href={`/sound-sphere/${roomData.id}`} className="flex-1 truncate pr-2 cursor-pointer group">
+                            <p className="font-semibold truncate group-hover:underline">{roomData.title}</p>
+                            <p className="text-sm text-muted-foreground">Click to re-join</p>
+                        </Link>
+                        <div className="flex items-center gap-1">
+                            {canSpeak && (
+                                <Button
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={toggleMute}
+                                    className="h-9 w-9"
+                                >
+                                    {isMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                                     <span className="sr-only">{isMuted ? 'Unmute' : 'Mute'}</span>
+                                </Button>
+                            )}
+                            <Button variant="destructive" size="icon" onClick={leaveRoom} className="h-9 w-9">
+                                <LogOut className="h-4 w-4" />
+                                <span className="sr-only">Leave Room</span>
+                            </Button>
                         </div>
-                        <Button variant="destructive" size="icon" onClick={leaveRoom} className="h-9 w-9">
-                            <LogOut className="h-4 w-4" />
-                        </Button>
                     </CardContent>
                 </Card>
             </div>
@@ -1147,3 +1165,4 @@ export function ChatLauncher() {
         </>
     )
 }
+
