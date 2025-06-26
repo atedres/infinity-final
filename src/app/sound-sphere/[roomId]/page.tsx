@@ -153,7 +153,7 @@ export default function AudioRoomPage() {
         
         const handleBeforeUnload = () => {
            if (cleanupRef.current) {
-               // No-op. We want the audio to continue playing.
+               cleanupRef.current();
            }
         };
         
@@ -162,6 +162,9 @@ export default function AudioRoomPage() {
         return () => {
              unsubscribeAuth();
              window.removeEventListener('beforeunload', handleBeforeUnload);
+             if (cleanupRef.current) {
+                cleanupRef.current();
+             }
         };
     }, [router, toast]);
 
@@ -242,7 +245,7 @@ export default function AudioRoomPage() {
 
                     const participantsCollectionRef = collection(roomRef, "participants");
                     const remainingParticipantsSnap = await getDocs(participantsCollectionRef);
-                    if (remainingParticipantsSnap.size === 0) {
+                    if (remainingParticipantsSnap.docs.length === 0) {
                         console.log(`[CLEANUP] Room ${roomId} is empty, deleting.`);
                         await deleteDoc(roomRef);
                     } else {
@@ -250,8 +253,7 @@ export default function AudioRoomPage() {
                     }
                 }
             } catch (error) {
-                 // Check if the error is due to the document not being found, which is okay if it was deleted by another client.
-                if (error instanceof Error && (error as any).code !== 'not-found') {
+                 if (error instanceof Error && (error as any).code !== 'not-found') {
                     console.error("[CLEANUP] Error during firestore cleanup: ", error);
                 }
             }
@@ -313,8 +315,9 @@ export default function AudioRoomPage() {
             const isCreator = roomData.creatorId === myId;
             const persistedRoles = roomData.roles || {};
             const persistedRole = persistedRoles[myId]; // 'moderator' or 'speaker'
-
             const myRole = isCreator ? 'creator' : persistedRole || 'listener';
+            const isModerator = myRole === 'creator' || myRole === 'moderator';
+
 
             const participantRef = doc(db, "audioRooms", roomId, "participants", myId);
             await setDoc(participantRef, {
@@ -442,7 +445,7 @@ export default function AudioRoomPage() {
                 });
             });
 
-            if (isCreator) {
+            if (isModerator) {
                 const requestsRef = collection(db, "audioRooms", roomId, "requests");
                 unsubRequests = onSnapshot(requestsRef, snapshot => {
                     setSpeakingRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SpeakRequest)));
@@ -936,7 +939,7 @@ export default function AudioRoomPage() {
                         </CardContent>
                     </Card>
                 )}
-                 {isCreator && speakingRequests.length > 0 && (
+                 {isModerator && speakingRequests.length > 0 && (
                      <Card className="border-primary">
                         <CardHeader>
                             <CardTitle>Speaking Requests ({speakingRequests.length})</CardTitle>
@@ -1144,7 +1147,7 @@ export default function AudioRoomPage() {
                         <LogOut className="mr-2 h-5 w-5" />
                         Leave
                     </Button>
-                    {isCreator && (
+                    {isModerator && myRole === 'creator' && (
                         <Button variant="destructive" onClick={handleEndRoom} className="sm:w-auto w-full">
                             <XCircle className="mr-2 h-5 w-5" />
                             End Room
