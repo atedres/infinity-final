@@ -537,6 +537,7 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
         storage,
         isRoomLoading,
         remoteStreams,
+        activeRoomId,
         isFloating,
         selfPromoteToSpeaker,
     };
@@ -548,8 +549,21 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
     );
 }
 
+function RoomAudioRenderer() {
+    const { remoteStreams, activeRoomId } = useFloatingRoom();
+    if (!activeRoomId || !remoteStreams) return null;
+
+    return (
+        <>
+            {remoteStreams.map((remote: RemoteStream) => (
+                <AudioPlayer key={remote.peerId} stream={remote.stream} />
+            ))}
+        </>
+    );
+}
+
 function FloatingRoomPlayer() {
-    const { isFloating, roomData, leaveRoom, remoteStreams, isMuted, toggleMute, participants, currentUser } = useFloatingRoom();
+    const { isFloating, roomData, leaveRoom, isMuted, toggleMute, participants, currentUser } = useFloatingRoom();
 
     if (!isFloating || !roomData || !currentUser) {
         return null;
@@ -559,38 +573,33 @@ function FloatingRoomPlayer() {
     const canSpeak = myParticipantData?.role === 'creator' || myParticipantData?.role === 'moderator' || myParticipantData?.role === 'speaker';
 
     return (
-        <>
-            {remoteStreams.map((remote: RemoteStream) => (
-                <AudioPlayer key={remote.peerId} stream={remote.stream} />
-            ))}
-            <div className="fixed bottom-6 right-24 z-50">
-                <Card className="w-80 shadow-2xl">
-                    <CardContent className="p-3 flex items-center justify-between gap-2">
-                         <Link href={`/sound-sphere/${roomData.id}`} className="flex-1 truncate pr-2 cursor-pointer group">
-                            <p className="font-semibold truncate group-hover:underline">{roomData.title}</p>
-                            <p className="text-sm text-muted-foreground">Click to re-join</p>
-                        </Link>
-                        <div className="flex items-center gap-1">
-                            {canSpeak && (
-                                <Button
-                                    variant="outline"
-                                    size="icon"
-                                    onClick={toggleMute}
-                                    className="h-9 w-9"
-                                >
-                                    {isMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-                                     <span className="sr-only">{isMuted ? 'Unmute' : 'Mute'}</span>
-                                </Button>
-                            )}
-                            <Button variant="destructive" size="icon" onClick={leaveRoom} className="h-9 w-9">
-                                <LogOut className="h-4 w-4" />
-                                <span className="sr-only">Leave Room</span>
+        <div className="fixed bottom-6 right-24 z-50">
+            <Card className="w-80 shadow-2xl">
+                <CardContent className="p-3 flex items-center justify-between gap-2">
+                     <Link href={`/sound-sphere/${roomData.id}`} className="flex-1 truncate pr-2 cursor-pointer group">
+                        <p className="font-semibold truncate group-hover:underline">{roomData.title}</p>
+                        <p className="text-sm text-muted-foreground">Click to re-join</p>
+                    </Link>
+                    <div className="flex items-center gap-1">
+                        {canSpeak && (
+                            <Button
+                                variant="outline"
+                                size="icon"
+                                onClick={toggleMute}
+                                className="h-9 w-9"
+                            >
+                                {isMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                                 <span className="sr-only">{isMuted ? 'Unmute' : 'Mute'}</span>
                             </Button>
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
-        </>
+                        )}
+                        <Button variant="destructive" size="icon" onClick={leaveRoom} className="h-9 w-9">
+                            <LogOut className="h-4 w-4" />
+                            <span className="sr-only">Leave Room</span>
+                        </Button>
+                    </div>
+                </CardContent>
+            </Card>
+        </div>
     );
 }
 
@@ -1215,6 +1224,7 @@ function ChatLauncherUI() {
 export function ChatLauncher() {
     return (
         <>
+            <RoomAudioRenderer />
             <ChatLauncherUI />
             <FloatingRoomPlayer />
         </>
