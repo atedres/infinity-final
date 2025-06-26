@@ -7,14 +7,17 @@ import { SubpageLayout } from "@/components/layout/subpage-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Textarea } from '@/components/ui/textarea';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, collection, onSnapshot, setDoc, deleteDoc, updateDoc, getDocs, query, where, addDoc, serverTimestamp } from 'firebase/firestore';
-import { Mic, MicOff, LogOut, XCircle, Hand, Check, X, Users, Headphones, UserPlus, UserCheck, MessageSquare, UserX, Link as LinkIcon, MoreVertical, PictureInPicture } from 'lucide-react';
+import { doc, getDoc, collection, onSnapshot, setDoc, deleteDoc, updateDoc, getDocs, query, where, addDoc, serverTimestamp, Timestamp, writeBatch, deleteField } from 'firebase/firestore';
+import { Mic, MicOff, LogOut, XCircle, Hand, Check, X, Users, Headphones, UserPlus, UserCheck, MessageSquare, UserX, Link as LinkIcon, MoreVertical, PictureInPicture, Edit, ShieldCheck, TimerIcon, MessageSquareText, Send, Crown } from 'lucide-react';
 import Peer from 'simple-peer';
 import type { Instance as PeerInstance } from 'simple-peer';
 import 'webrtc-adapter';
@@ -27,7 +30,8 @@ interface Room {
     description: string;
     creatorId: string;
     pinnedLink?: string;
-    roles?: { [key: string]: 'speaker' };
+    roles?: { [key: string]: 'speaker' | 'moderator' };
+    createdAt: Timestamp;
 }
 
 interface Participant {
@@ -35,7 +39,7 @@ interface Participant {
     name: string;
     avatar: string;
     isMuted: boolean;
-    role: 'creator' | 'speaker' | 'listener';
+    role: 'creator' | 'moderator' | 'speaker' | 'listener';
 }
 
 interface SpeakRequest {
@@ -47,6 +51,15 @@ interface SpeakRequest {
 interface RemoteStream {
     peerId: string;
     stream: MediaStream;
+}
+
+interface ChatMessage {
+    id: string;
+    text: string;
+    senderId: string;
+    senderName: string;
+    senderAvatar: string;
+    createdAt: Timestamp;
 }
 
 const AudioPlayer = ({ stream }: { stream: MediaStream }) => {
@@ -107,10 +120,25 @@ export default function AudioRoomPage() {
     const [pinnedLink, setPinnedLink] = useState<string | null>(null);
     const [isPinLinkDialogOpen, setIsPinLinkDialogOpen] = useState(false);
     const [linkToPin, setLinkToPin] = useState('');
-    
+
     // PiP State
     const pipVideoRef = useRef<HTMLVideoElement>(null);
     const pipCanvasRef = useRef<HTMLCanvasElement>(null);
+
+    // Timer State
+    const [elapsedTime, setElapsedTime] = useState('00:00');
+
+    // Title Edit State
+    const [isTitleEditDialogOpen, setIsTitleEditDialogOpen] = useState(false);
+    const [newRoomTitle, setNewRoomTitle] = useState('');
+
+    // Chat State
+    const [isChatOpen, setIsChatOpen] = useState(false);
+    const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+    const [newChatMessage, setNewChatMessage] = useState('');
+    const chatUnsubscribeRef = useRef<() => void | null>(null);
+    const chatMessagesEndRef = useRef<HTMLDivElement>(null);
+
 
     useEffect(() => {
         const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
@@ -136,6 +164,32 @@ export default function AudioRoomPage() {
              window.removeEventListener('beforeunload', handleBeforeUnload);
         };
     }, [router, toast]);
+
+    useEffect(() => {
+        if (!room?.createdAt) return;
+
+        const interval = setInterval(() => {
+            const startTime = room.createdAt.toDate();
+            const now = new Date();
+            const diff = now.getTime() - startTime.getTime();
+
+            const hours = Math.floor(diff / (1000 * 60 * 60));
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+            const paddedMinutes = minutes.toString().padStart(2, '0');
+            const paddedSeconds = seconds.toString().padStart(2, '0');
+
+            if (hours > 0) {
+                const paddedHours = hours.toString().padStart(2, '0');
+                setElapsedTime(`${paddedHours}:${paddedMinutes}:${paddedSeconds}`);
+            } else {
+                setElapsedTime(`${paddedMinutes}:${paddedSeconds}`);
+            }
+        }, 1000);
+
+        return () => clearInterval(interval);
+    }, [room?.createdAt]);
     
      const fetchUserRelations = async (userId: string) => {
         if (!db) return;
@@ -240,6 +294,7 @@ export default function AudioRoomPage() {
                 }
                 const roomData = { id: docSnap.id, ...docSnap.data() } as Room
                 setRoom(roomData);
+                setNewRoomTitle(roomData.title);
                 setPinnedLink(roomData.pinnedLink || null);
 
             }, (error) => {
@@ -257,9 +312,9 @@ export default function AudioRoomPage() {
             const roomData = initialRoomSnap.data() as Room;
             const isCreator = roomData.creatorId === myId;
             const persistedRoles = roomData.roles || {};
-            const isPersistedSpeaker = persistedRoles[myId] === 'speaker';
+            const persistedRole = persistedRoles[myId]; // 'moderator' or 'speaker'
 
-            const myRole = isCreator ? 'creator' : isPersistedSpeaker ? 'speaker' : 'listener';
+            const myRole = isCreator ? 'creator' : persistedRole || 'listener';
 
             const participantRef = doc(db, "audioRooms", roomId, "participants", myId);
             await setDoc(participantRef, {
@@ -443,6 +498,32 @@ export default function AudioRoomPage() {
 
         fetchStats();
     }, [selectedUser, db, toast]);
+
+    useEffect(() => {
+        if (!isChatOpen || !roomId || !db) {
+            if (chatUnsubscribeRef.current) {
+                chatUnsubscribeRef.current();
+                chatUnsubscribeRef.current = null;
+            }
+            return;
+        }
+        const messagesRef = collection(db, "audioRooms", roomId, "chatMessages");
+        const q = query(messagesRef, orderBy("createdAt", "asc"));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            setChatMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as ChatMessage));
+        });
+        chatUnsubscribeRef.current = unsubscribe;
+
+        return () => {
+            if (chatUnsubscribeRef.current) {
+                chatUnsubscribeRef.current();
+            }
+        }
+    }, [isChatOpen, roomId, db]);
+
+    useEffect(() => {
+        chatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [chatMessages]);
     
     // Effect to set up the Picture-in-Picture canvas and stream
     useEffect(() => {
@@ -501,6 +582,7 @@ export default function AudioRoomPage() {
             await deleteDoc(doc(db, "audioRooms", roomId));
         } catch(error) {
             console.error("Error ending room:", error);
+            toast({ title: "Error", description: "Could not end room.", variant: "destructive" });
         } finally {
             router.push('/sound-sphere');
         }
@@ -546,16 +628,7 @@ export default function AudioRoomPage() {
         if (!db) return;
         const requestRef = doc(db, "audioRooms", roomId, "requests", requesterId);
         if (accept) {
-            const participantRef = doc(db, "audioRooms", roomId, "participants", requesterId);
-            const roomRef = doc(db, "audioRooms", roomId);
-            try {
-                await updateDoc(roomRef, {
-                    [`roles.${requesterId}`]: 'speaker'
-                });
-                await updateDoc(participantRef, { role: 'speaker', isMuted: false });
-            } catch(e) {
-                console.warn("Participant may have left before being accepted.");
-            }
+            await handleChangeRole(requesterId, 'speaker');
         }
         await deleteDoc(requestRef);
     };
@@ -684,23 +757,83 @@ export default function AudioRoomPage() {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
     }, [handleEnterPip]);
+    
+    const handleTitleUpdate = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!db || !newRoomTitle.trim() || !isModerator) return;
+        try {
+            const roomRef = doc(db, "audioRooms", roomId);
+            await updateDoc(roomRef, { title: newRoomTitle });
+            toast({ title: "Room title updated" });
+            setIsTitleEditDialogOpen(false);
+        } catch (error) {
+            console.error("Error updating title:", error);
+            toast({ title: "Error", description: "Could not update room title.", variant: "destructive" });
+        }
+    };
+    
+    const handleSendMessage = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!db || !currentUser || !newChatMessage.trim()) return;
+
+        const messagesColRef = collection(db, "audioRooms", roomId, "chatMessages");
+        try {
+            await addDoc(messagesColRef, {
+                text: newChatMessage,
+                senderId: currentUser.uid,
+                senderName: currentUser.displayName,
+                senderAvatar: currentUser.photoURL,
+                createdAt: serverTimestamp(),
+            });
+            setNewChatMessage('');
+        } catch (error) {
+            console.error("Error sending chat message:", error);
+            toast({ title: "Error", description: "Could not send message.", variant: "destructive" });
+        }
+    };
+
+    const handleChangeRole = async (targetId: string, newRole: 'moderator' | 'speaker' | 'listener') => {
+        if (!db || !isModerator) return;
+
+        const roomRef = doc(db, "audioRooms", roomId);
+        const participantRef = doc(db, "audioRooms", roomId, "participants", targetId);
+
+        try {
+            const batch = writeBatch(db);
+
+            batch.update(participantRef, { role: newRole, isMuted: newRole === 'listener' });
+
+            if (newRole === 'listener') {
+                batch.update(roomRef, { [`roles.${targetId}`]: deleteField() });
+            } else {
+                batch.update(roomRef, { [`roles.${targetId}`]: newRole });
+            }
+
+            await batch.commit();
+            toast({ title: "Role Updated" });
+            setSelectedUser(null);
+        } catch (error) {
+            console.error("Error changing role:", error);
+            toast({ title: "Error", description: "Could not update user role.", variant: "destructive" });
+        }
+    };
 
 
     if (isLoading || !room || !currentUser) {
         return <SubpageLayout title="Sound Sphere Room" backHref="/sound-sphere?tab=rooms"><div className="text-center">Loading room...</div></SubpageLayout>;
     }
 
-    const isCreator = currentUser?.uid === room.creatorId;
     const myParticipantData = participants.find(p => p.id === currentUser.uid);
     const myRole = myParticipantData?.role;
-    const canSpeak = myRole === 'creator' || myRole === 'speaker';
+    const isModerator = myRole === 'creator' || myRole === 'moderator';
+    const canSpeak = isModerator || myRole === 'speaker';
     const isFollowingSelected = selectedUser && followingIds.includes(selectedUser.id);
     
-    const speakers = participants.filter(p => p.role === 'creator' || p.role === 'speaker');
+    const speakers = participants.filter(p => p.role === 'creator' || p.role === 'moderator' || p.role === 'speaker');
     const listeners = participants.filter(p => p.role === 'listener');
     
     const renderParticipant = (p: Participant) => {
-        const isUnmutedSpeaker = (p.role === 'creator' || p.role === 'speaker') && !p.isMuted;
+        const isUnmutedSpeaker = (p.role !== 'listener') && !p.isMuted;
         
         return (
             <button
@@ -713,22 +846,31 @@ export default function AudioRoomPage() {
                 disabled={p.id === currentUser.uid}
                 className="relative flex flex-col items-center gap-2 cursor-pointer transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-70"
             >
-                <Avatar className={cn(
-                    'h-16 w-16 sm:h-20 sm:w-20 border-4',
-                    isUnmutedSpeaker ? 'border-green-500' : 'border-transparent'
-                )}>
-                    <AvatarImage src={p.avatar} data-ai-hint="person portrait"/>
-                    <AvatarFallback>{p.name?.[0]}</AvatarFallback>
-                </Avatar>
-                {(p.isMuted || p.role === 'listener') && (
-                    <div className="absolute top-1 right-1 bg-slate-700 rounded-full p-1 border-2 border-background">
-                        <MicOff className="h-3 w-3 text-slate-100" />
-                    </div>
-                )}
+                <div className="relative">
+                    <Avatar className={cn(
+                        'h-16 w-16 sm:h-20 sm:w-20 border-4',
+                        isUnmutedSpeaker ? 'border-green-500' : 'border-transparent'
+                    )}>
+                        <AvatarImage src={p.avatar} data-ai-hint="person portrait"/>
+                        <AvatarFallback>{p.name?.[0]}</AvatarFallback>
+                    </Avatar>
+                     {(p.isMuted || p.role === 'listener') && (
+                        <div className="absolute top-0 right-0 bg-slate-700 rounded-full p-1 border-2 border-background">
+                            <MicOff className="h-3 w-3 text-slate-100" />
+                        </div>
+                    )}
+                     {(p.role === 'creator' || p.role === 'moderator') && (
+                        <div className="absolute bottom-0 right-0 bg-primary rounded-full p-1 border-2 border-background">
+                            {p.role === 'creator' ? <Crown className="h-3 w-3 text-primary-foreground" /> : <ShieldCheck className="h-3 w-3 text-primary-foreground" />}
+                        </div>
+                    )}
+                </div>
                 <p className="font-medium text-sm truncate w-full text-center">{p.name}</p>
             </button>
         );
     };
+    
+    const canManageSelectedUser = isModerator && selectedUser && selectedUser.id !== currentUser.uid;
 
     return (
         <SubpageLayout title={room.title} backHref="/sound-sphere?tab=rooms" showTitle={false}>
@@ -740,9 +882,33 @@ export default function AudioRoomPage() {
             </div>
 
             <div className="mx-auto max-w-4xl space-y-8">
-                 <div className="text-left">
-                    <h1 className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl font-headline">{room.title}</h1>
-                    <p className="mt-2 text-lg text-muted-foreground">{room.description}</p>
+                 <div className="text-left space-y-2">
+                    <div className="flex items-center gap-2">
+                        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl font-headline">{room.title}</h1>
+                        {isModerator && (
+                             <Dialog open={isTitleEditDialogOpen} onOpenChange={setIsTitleEditDialogOpen}>
+                                <DialogTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8"><Edit className="h-5 w-5" /></Button>
+                                </DialogTrigger>
+                                <DialogContent>
+                                    <DialogHeader>
+                                        <DialogTitle>Edit Room Title</DialogTitle>
+                                    </DialogHeader>
+                                    <form onSubmit={handleTitleUpdate} className="space-y-4">
+                                        <Input value={newRoomTitle} onChange={(e) => setNewRoomTitle(e.target.value)} />
+                                        <DialogFooter>
+                                            <Button type="submit">Save Changes</Button>
+                                        </DialogFooter>
+                                    </form>
+                                </DialogContent>
+                            </Dialog>
+                        )}
+                    </div>
+                    <p className="text-lg text-muted-foreground">{room.description}</p>
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                        <TimerIcon className="h-4 w-4" />
+                        <p className="text-sm font-mono">{elapsedTime}</p>
+                    </div>
                 </div>
                 {pinnedLink && (
                      <Card>
@@ -855,17 +1021,37 @@ export default function AudioRoomPage() {
                                         <div className="col-span-3 text-muted-foreground">Could not load stats.</div>
                                     )}
                                 </div>
-                                <div className="flex justify-center gap-2 pt-4">
-                                    <Button onClick={handleFollowToggle}>
-                                        {isFollowingSelected ? <UserCheck className="mr-2 h-4 w-4" /> : <UserPlus className="mr-2 h-4 w-4" />}
-                                        {isFollowingSelected ? 'Following' : 'Follow'}
-                                    </Button>
-                                    <Button variant="outline" onClick={handleMessageClick}>
-                                        <MessageSquare className="mr-2 h-4 w-4" /> Message
-                                    </Button>
-                                    <Button variant="destructive" onClick={handleBlockUser}>
-                                        <UserX className="mr-2 h-4 w-4" /> Block
-                                    </Button>
+                                <div className="space-y-2 pt-4">
+                                     <div className="flex justify-center gap-2">
+                                        <Button onClick={handleFollowToggle}>
+                                            {isFollowingSelected ? <UserCheck className="mr-2 h-4 w-4" /> : <UserPlus className="mr-2 h-4 w-4" />}
+                                            {isFollowingSelected ? 'Following' : 'Follow'}
+                                        </Button>
+                                        <Button variant="outline" onClick={handleMessageClick}>
+                                            <MessageSquare className="mr-2 h-4 w-4" /> Message
+                                        </Button>
+                                        <Button variant="destructive" onClick={handleBlockUser}>
+                                            <UserX className="mr-2 h-4 w-4" /> Block
+                                        </Button>
+                                    </div>
+                                    {canManageSelectedUser && selectedUser.role !== 'creator' && <div className="border-t pt-4 space-y-2">
+                                        <p className="text-sm font-medium text-center">Moderator Actions</p>
+                                        <div className="flex justify-center gap-2">
+                                            {selectedUser.role === 'listener' && <Button size="sm" onClick={() => handleChangeRole(selectedUser.id, 'speaker')}>Invite to Speak</Button>}
+                                            {selectedUser.role === 'speaker' && (
+                                                <>
+                                                    <Button size="sm" onClick={() => handleChangeRole(selectedUser.id, 'moderator')}>Make Moderator</Button>
+                                                    <Button size="sm" variant="outline" onClick={() => handleChangeRole(selectedUser.id, 'listener')}>Move to Listeners</Button>
+                                                </>
+                                            )}
+                                            {selectedUser.role === 'moderator' && (
+                                                <>
+                                                    <Button size="sm" onClick={() => handleChangeRole(selectedUser.id, 'speaker')}>Demote to Speaker</Button>
+                                                    <Button size="sm" variant="outline" onClick={() => handleChangeRole(selectedUser.id, 'listener')}>Move to Listeners</Button>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>}
                                 </div>
                             </>
                         )}
@@ -893,6 +1079,37 @@ export default function AudioRoomPage() {
                 </Dialog>
 
                 <div className="flex flex-wrap items-center justify-center gap-2">
+                    <Sheet open={isChatOpen} onOpenChange={setIsChatOpen}>
+                        <SheetTrigger asChild>
+                            <Button variant="outline" className="sm:w-auto w-full"><MessageSquareText className="mr-2 h-5 w-5" /> Chat</Button>
+                        </SheetTrigger>
+                        <SheetContent className="flex flex-col">
+                            <SheetHeader>
+                                <SheetTitle>Live Chat</SheetTitle>
+                            </SheetHeader>
+                            <ScrollArea className="flex-1 -mx-6 px-6 mt-4">
+                                <div className="space-y-4 pr-1 pb-4">
+                                    {chatMessages.map(msg => (
+                                        <div key={msg.id} className="flex items-start gap-3">
+                                             <Avatar className="h-8 w-8">
+                                                <AvatarImage src={msg.senderAvatar} />
+                                                <AvatarFallback>{msg.senderName?.[0]}</AvatarFallback>
+                                            </Avatar>
+                                            <div>
+                                                <p className="text-sm font-semibold">{msg.senderName}</p>
+                                                <p className="text-sm bg-muted p-2 rounded-lg mt-1">{msg.text}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    <div ref={chatMessagesEndRef} />
+                                </div>
+                            </ScrollArea>
+                             <form onSubmit={handleSendMessage} className="flex items-center gap-2 pt-4 border-t">
+                                <Textarea value={newChatMessage} onChange={(e) => setNewChatMessage(e.target.value)} placeholder="Send a message..." rows={1} className="min-h-0"/>
+                                <Button type="submit" size="icon" disabled={!newChatMessage.trim()}><Send className="h-4 w-4"/></Button>
+                            </form>
+                        </SheetContent>
+                    </Sheet>
                      {canSpeak ? (
                         <>
                         <Button
@@ -938,7 +1155,3 @@ export default function AudioRoomPage() {
         </SubpageLayout>
     );
 }
-
-    
-
-    
