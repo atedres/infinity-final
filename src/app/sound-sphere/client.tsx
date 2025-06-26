@@ -1,6 +1,7 @@
+
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
@@ -20,7 +21,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useToast } from '@/hooks/use-toast';
 import { db, auth, storage } from '@/lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, addDoc, getDocs, serverTimestamp, query, orderBy, where, doc, setDoc, deleteDoc, getDoc, updateDoc, increment, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, getDocs, serverTimestamp, query, orderBy, where, doc, setDoc, deleteDoc, getDoc, updateDoc, increment, Timestamp, onSnapshot } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { formatDistanceToNow } from 'date-fns';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -134,63 +135,6 @@ export default function SoundSphereClient() {
     const [isSearching, setIsSearching] = useState(false);
     const [user, setUser] = useState<User | null>(null);
 
-    useEffect(() => {
-        const hash = window.location.hash;
-        if (hash) {
-            const elementId = hash.substring(1);
-            const element = document.getElementById(elementId);
-            if (element) {
-                setTimeout(() => {
-                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    element.classList.add('bg-accent/20', 'transition-colors', 'duration-1000', 'rounded-lg');
-                    setTimeout(() => {
-                        element.classList.remove('bg-accent/20', 'transition-colors', 'duration-1000', 'rounded-lg');
-                    }, 2500);
-                }, 500);
-            }
-        }
-    }, []);
-
-    useEffect(() => {
-        if (!auth) return;
-        const unsubscribe = onAuthStateChanged(auth, currentUser => {
-            setUser(currentUser);
-            if (currentUser) {
-                fetchPosts(currentUser.uid);
-                fetchRooms();
-                fetchFollowing(currentUser.uid);
-            } else {
-                setPosts([]);
-                setRooms([]);
-                setFollowingIds([]);
-                setIsCreatePostFabVisible(false);
-            }
-        });
-
-        // Intersection Observer for the floating button
-        const observer = new IntersectionObserver(
-            ([entry]) => {
-                if (auth.currentUser) {
-                    setIsCreatePostFabVisible(!entry.isIntersecting);
-                } else {
-                    setIsCreatePostFabVisible(false);
-                }
-            },
-            { rootMargin: "0px 0px -150px 0px", threshold: 0 }
-        );
-
-        if (createPostCardRef.current) {
-            observer.observe(createPostCardRef.current);
-        }
-
-        return () => {
-            unsubscribe();
-            if (createPostCardRef.current) {
-                observer.unobserve(createPostCardRef.current);
-            }
-        };
-    }, []);
-
     const fetchPosts = async (currentUserId?: string) => {
         if (!db) return;
         const q = query(collection(db, "posts"), orderBy("createdAt", "desc"));
@@ -216,14 +160,6 @@ export default function SoundSphereClient() {
         setLikedPosts(newLikedPosts);
     }
 
-    const fetchRooms = async () => {
-        if (!db) return;
-        const q = query(collection(db, "audioRooms"), where("isPublic", "==", true), orderBy("createdAt", "desc"));
-        const querySnapshot = await getDocs(q);
-        const roomsList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room));
-        setRooms(roomsList);
-    };
-
     const fetchFollowing = async (userId: string) => {
         if (!db) return;
         const q = collection(db, "users", userId, "following");
@@ -231,6 +167,82 @@ export default function SoundSphereClient() {
         const ids = querySnapshot.docs.map(doc => doc.id);
         setFollowingIds(ids);
     };
+
+    useEffect(() => {
+        const hash = window.location.hash;
+        if (hash) {
+            const elementId = hash.substring(1);
+            const element = document.getElementById(elementId);
+            if (element) {
+                setTimeout(() => {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    element.classList.add('bg-accent/20', 'transition-colors', 'duration-1000', 'rounded-lg');
+                    setTimeout(() => {
+                        element.classList.remove('bg-accent/20', 'transition-colors', 'duration-1000', 'rounded-lg');
+                    }, 2500);
+                }, 500);
+            }
+        }
+
+        if (!auth || !db) return;
+
+        let roomsUnsubscribe: (() => void) | null = null;
+        
+        const authUnsubscribe = onAuthStateChanged(auth, currentUser => {
+            setUser(currentUser);
+            
+            if (roomsUnsubscribe) {
+                roomsUnsubscribe();
+                roomsUnsubscribe = null;
+            }
+
+            if (currentUser) {
+                fetchPosts(currentUser.uid);
+                fetchFollowing(currentUser.uid);
+
+                const q = query(collection(db, "audioRooms"), where("isPublic", "==", true), orderBy("createdAt", "desc"));
+                roomsUnsubscribe = onSnapshot(q, (querySnapshot) => {
+                    const roomsList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room));
+                    setRooms(roomsList);
+                }, (error) => {
+                     console.error("Error fetching rooms in real-time:", error);
+                     toast({ title: "Error", description: "Could not load audio rooms.", variant: "destructive" });
+                });
+
+            } else {
+                setPosts([]);
+                setRooms([]);
+                setFollowingIds([]);
+                setIsCreatePostFabVisible(false);
+            }
+        });
+
+        // Intersection Observer for the floating button
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                if (auth.currentUser) {
+                    setIsCreatePostFabVisible(!entry.isIntersecting);
+                } else {
+                    setIsCreatePostFabVisible(false);
+                }
+            },
+            { rootMargin: "0px 0px -150px 0px", threshold: 0 }
+        );
+
+        if (createPostCardRef.current) {
+            observer.observe(createPostCardRef.current);
+        }
+
+        return () => {
+            authUnsubscribe();
+            if (roomsUnsubscribe) {
+                roomsUnsubscribe();
+            }
+            if (createPostCardRef.current) {
+                observer.unobserve(createPostCardRef.current);
+            }
+        };
+    }, []);
 
     const handleSearch = async (queryTerm: string) => {
         if (!db || queryTerm.length < 2 || !user) {
@@ -399,7 +411,7 @@ export default function SoundSphereClient() {
             setIsRoomDialogOpen(false);
             setRoomTitle('');
             setRoomDescription('');
-            fetchRooms();
+            // No need to call fetchRooms, listener will pick it up
             router.push(`/sound-sphere/${newRoomRef.id}`);
         } catch (error) {
             console.error("Error creating room:", error);
