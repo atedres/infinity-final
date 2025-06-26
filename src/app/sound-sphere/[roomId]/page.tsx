@@ -596,17 +596,17 @@ export default function AudioRoomPage() {
                                     {canManageSelectedUser && selectedUser.role !== 'creator' && <div className="border-t pt-4 space-y-2">
                                         <p className="text-sm font-medium text-center">Moderator Actions</p>
                                         <div className="flex flex-wrap justify-center gap-2">
-                                            {selectedUser.role === 'listener' && <Button size="sm" onClick={() => changeRole(selectedUser.id, 'speaker')}>Invite to Speak</Button>}
+                                            {selectedUser.role === 'listener' && <Button size="sm" onClick={() => { changeRole(selectedUser.id, 'speaker'); setSelectedUser(null); }}>Invite to Speak</Button>}
                                             {selectedUser.role === 'speaker' && (
                                                 <>
-                                                    <Button size="sm" onClick={() => changeRole(selectedUser.id, 'moderator')}>Make Moderator</Button>
-                                                    <Button size="sm" variant="outline" onClick={() => changeRole(selectedUser.id, 'listener')}>Move to Listeners</Button>
+                                                    <Button size="sm" onClick={() => { changeRole(selectedUser.id, 'moderator'); setSelectedUser(null); }}>Make Moderator</Button>
+                                                    <Button size="sm" variant="outline" onClick={() => { changeRole(selectedUser.id, 'listener'); setSelectedUser(null); }}>Move to Listeners</Button>
                                                 </>
                                             )}
                                             {selectedUser.role === 'moderator' && (
                                                 <>
-                                                    <Button size="sm" onClick={() => changeRole(selectedUser.id, 'speaker')}>Demote to Speaker</Button>
-                                                    <Button size="sm" variant="outline" onClick={() => changeRole(selectedUser.id, 'listener')}>Move to Listeners</Button>
+                                                    <Button size="sm" onClick={() => { changeRole(selectedUser.id, 'speaker'); setSelectedUser(null); }}>Demote to Speaker</Button>
+                                                    <Button size="sm" variant="outline" onClick={() => { changeRole(selectedUser.id, 'listener'); setSelectedUser(null); }}>Move to Listeners</Button>
                                                 </>
                                             )}
                                              <Button size="sm" variant="destructive" onClick={() => {
