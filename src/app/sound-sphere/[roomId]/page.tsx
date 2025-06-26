@@ -18,7 +18,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 import { db } from "@/lib/firebase";
 import { updateProfile } from 'firebase/auth';
-import { doc, collection, setDoc, deleteDoc, updateDoc, writeBatch, deleteField, serverTimestamp, getDoc, query, orderBy, onSnapshot, addDoc } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, updateDoc, writeBatch, deleteField, serverTimestamp, getDoc, query, orderBy, onSnapshot, addDoc } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Mic, MicOff, LogOut, XCircle, Hand, Check, X, Users, Headphones, UserPlus, UserCheck, MessageSquare, UserX, Link as LinkIcon, MoreVertical, Edit, ShieldCheck, TimerIcon, MessageSquareText, Send, Crown, Camera } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -120,6 +120,7 @@ export default function AudioRoomPage() {
         showFloatingPlayer,
         storage,
         isRoomLoading,
+        selfPromoteToSpeaker,
     } = useFloatingRoom();
     
     // In-room profile editing refs
@@ -164,6 +165,10 @@ export default function AudioRoomPage() {
     const [newChatMessage, setNewChatMessage] = useState('');
     const chatMessagesEndRef = useRef<HTMLDivElement>(null);
     
+    // Alert Dialog states
+    const [isLeaveAlertOpen, setIsLeaveAlertOpen] = useState(false);
+    const [isEndAlertOpen, setIsEndAlertOpen] = useState(false);
+
     useEffect(() => {
         joinRoom(roomId);
         setIsLoading(false);
@@ -361,6 +366,11 @@ export default function AudioRoomPage() {
     const speakers = participants.filter(p => p.role === 'creator' || p.role === 'moderator' || p.role === 'speaker');
     const listeners = participants.filter(p => p.role === 'listener');
     
+    const hasAdmins = participants.some(p => p.role === 'creator' || p.role === 'moderator');
+    const hasSpeakers = participants.some(p => p.role === 'speaker');
+    const isOpenStage = participants.length > 0 && !hasAdmins && !hasSpeakers;
+
+
     const renderParticipant = (p: Participant) => {
         const isUnmutedSpeaker = (p.role !== 'listener') && !p.isMuted;
         
@@ -683,24 +693,63 @@ export default function AudioRoomPage() {
                         </Button>
                         </>
                      ) : (
-                         <Button
-                            onClick={requestToSpeak}
-                            disabled={hasRequested}
-                            variant="outline"
-                         >
-                            <Hand className="mr-2 h-5 w-5" />
-                            {hasRequested ? 'Request Sent' : 'Request to Speak'}
-                         </Button>
+                        isOpenStage ? (
+                            <Button onClick={selfPromoteToSpeaker} variant="outline">
+                                <Mic className="mr-2 h-5 w-5" />
+                                Become a Speaker
+                            </Button>
+                        ) : (
+                            <Button
+                                onClick={requestToSpeak}
+                                disabled={hasRequested}
+                                variant="outline"
+                            >
+                                <Hand className="mr-2 h-5 w-5" />
+                                {hasRequested ? 'Request Sent' : 'Request to Speak'}
+                            </Button>
+                        )
                      )}
-                    <Button variant="outline" onClick={handleLeaveRoom} className="sm:w-auto w-full">
-                        <LogOut className="mr-2 h-5 w-5" />
-                        Leave
-                    </Button>
+                     <AlertDialog open={isLeaveAlertOpen} onOpenChange={setIsLeaveAlertOpen}>
+                        <AlertDialogTrigger asChild>
+                            <Button variant="outline" className="sm:w-auto w-full">
+                                <LogOut className="mr-2 h-5 w-5" />
+                                Leave
+                            </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle>Leave the room?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                    Are you sure you want to leave this room?
+                                </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={handleLeaveRoom}>Leave</AlertDialogAction>
+                            </AlertDialogFooter>
+                        </AlertDialogContent>
+                    </AlertDialog>
                     {isModerator && (
-                        <Button variant="destructive" onClick={handleEndRoomAndRedirect} className="sm:w-auto w-full">
-                            <XCircle className="mr-2 h-5 w-5" />
-                            End Room
-                        </Button>
+                         <AlertDialog open={isEndAlertOpen} onOpenChange={setIsEndAlertOpen}>
+                            <AlertDialogTrigger asChild>
+                                <Button variant="destructive" className="sm:w-auto w-full">
+                                    <XCircle className="mr-2 h-5 w-5" />
+                                    End Room
+                                </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                                <AlertDialogHeader>
+                                    <AlertDialogTitle>End the room?</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                        This will permanently close the room for everyone. This action cannot be undone.
+                                    </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction onClick={handleEndRoomAndRedirect} className="bg-destructive hover:bg-destructive/90">End Room</AlertDialogAction>
+                                </AlertDialogFooter>
+                            </AlertDialogContent>
+                        </AlertDialog>
                     )}
                 </div>
             </div>

@@ -169,6 +169,30 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
             return null;
         }
     }, [toast]);
+    
+    const changeRole = useCallback(async (targetId: string, newRole: 'moderator' | 'speaker' | 'listener') => {
+        if (!db || !activeRoomId || !currentUser) return;
+        const participantRef = doc(db, "audioRooms", activeRoomId, "participants", targetId);
+        
+        // If a mod is inviting a listener, send an invitation
+        const participantSnap = await getDoc(participantRef);
+        if (newRole === 'speaker' && participantSnap.data()?.role === 'listener' && targetId !== currentUser.uid) {
+            await setDoc(doc(db, "audioRooms", activeRoomId, "invitations", targetId), { inviterId: currentUser.uid, inviterName: currentUser.displayName });
+            toast({ title: "Invitation Sent" });
+            return;
+        }
+        
+        // Otherwise, change role directly
+        const batch = writeBatch(db);
+        batch.update(participantRef, { role: newRole, isMuted: newRole === 'listener' });
+        if (newRole === 'listener') {
+            batch.update(doc(db, "audioRooms", activeRoomId), { [`roles.${targetId}`]: deleteField() });
+        } else {
+            batch.update(doc(db, "audioRooms", activeRoomId), { [`roles.${targetId}`]: newRole });
+        }
+        await batch.commit();
+        toast({ title: "Role Updated" });
+    }, [activeRoomId, currentUser, toast]);
 
     const joinRoom = useCallback(async (roomId: string) => {
         if (!currentUser || !db) return;
@@ -306,6 +330,30 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
 
     }, [currentUser, activeRoomId, toast, getMicStream]);
     
+    // Auto-moderator promotion logic
+    useEffect(() => {
+        if (!activeRoomId || !db || participants.length === 0 || !roomData) return;
+
+        const autoPromote = async () => {
+            const admins = participants.filter(p => p.role === 'creator' || p.role === 'moderator');
+            const speakers = participants.filter(p => p.role === 'speaker');
+
+            if (admins.length === 0 && speakers.length > 0) {
+                const newModerator = speakers[0];
+                if (newModerator && newModerator.id) {
+                    if (roomData.roles?.[newModerator.id] !== 'moderator') {
+                        await changeRole(newModerator.id, 'moderator');
+                        toast({
+                            title: "New Moderator",
+                            description: `${newModerator.name} has been promoted to moderator.`
+                        });
+                    }
+                }
+            }
+        };
+        autoPromote();
+      }, [participants, activeRoomId, db, roomData, changeRole, toast]);
+
     const leaveRoom = useCallback(async () => {
         if (!activeRoomId || !currentUser || !db) return;
 
@@ -337,6 +385,13 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
             toast({ title: "Permission Denied", description: "Only the creator or a moderator can end the room.", variant: "destructive" });
             return;
         }
+
+        // Instead of deleting the room, we can just clear participants to end it.
+        const participantsColRef = collection(db, "audioRooms", activeRoomId, "participants");
+        const participantsSnap = await getDocs(participantsColRef);
+        const batch = writeBatch(db);
+        participantsSnap.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
 
         await deleteDoc(doc(db, "audioRooms", activeRoomId));
         await leaveRoom();
@@ -387,33 +442,24 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
         await deleteDoc(doc(db, "audioRooms", activeRoomId, "invitations", currentUser.uid));
     }, [currentUser, activeRoomId]);
     
-    const changeRole = useCallback(async (targetId: string, newRole: 'moderator' | 'speaker' | 'listener') => {
-        if (!db || !activeRoomId || !currentUser) return;
-        const participantRef = doc(db, "audioRooms", activeRoomId, "participants", targetId);
-        if (newRole === 'speaker' && (await getDoc(participantRef)).data()?.role === 'listener') {
-            await setDoc(doc(db, "audioRooms", activeRoomId, "invitations", targetId), { inviterId: currentUser.uid, inviterName: currentUser.displayName });
-            toast({ title: "Invitation Sent" });
-            return;
-        }
-        const batch = writeBatch(db);
-        batch.update(participantRef, { role: newRole, isMuted: newRole === 'listener' });
-        if (newRole === 'listener') {
-            batch.update(doc(db, "audioRooms", activeRoomId), { [`roles.${targetId}`]: deleteField() });
-        } else {
-            batch.update(doc(db, "audioRooms", activeRoomId), { [`roles.${targetId}`]: newRole });
-        }
-        await batch.commit();
-        toast({ title: "Role Updated" });
-    }, [activeRoomId, currentUser, toast]);
-    
     const removeUser = useCallback(async (targetId: string) => {
         if (!db || !activeRoomId || !currentUser) return;
         const batch = writeBatch(db);
         batch.set(doc(db, "audioRooms", activeRoomId, "bannedUsers", targetId), { bannedAt: serverTimestamp(), bannedBy: currentUser.uid });
-        batch.update(doc(db, "audioRooms", activeRoomId, "participants", targetId), { kicked: true });
+        // Instead of a "kicked" flag, we just delete them. The ban list will prevent re-entry.
+        batch.delete(doc(db, "audioRooms", activeRoomId, "participants", targetId));
         await batch.commit();
         toast({ title: "User Banned" });
     }, [activeRoomId, currentUser, toast]);
+
+    const selfPromoteToSpeaker = useCallback(async () => {
+        if (!db || !currentUser || !activeRoomId) return;
+        const participantRef = doc(db, "audioRooms", activeRoomId, "participants", currentUser.uid);
+        await updateDoc(participantRef, { role: 'speaker', isMuted: false });
+        setIsMuted(false);
+        localStreamRef.current?.getAudioTracks().forEach(track => track.enabled = true);
+        toast({ title: "You are now a speaker!" });
+    }, [currentUser, activeRoomId, toast, db]);
 
     const sendChatMessage = useCallback(async (text: string) => {
         if (!db || !currentUser || !activeRoomId || !text.trim()) return;
@@ -492,6 +538,7 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
         isRoomLoading,
         remoteStreams,
         isFloating,
+        selfPromoteToSpeaker,
     };
 
     return (
