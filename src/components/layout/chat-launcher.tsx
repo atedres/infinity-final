@@ -288,13 +288,21 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
                 if (p.id !== currentUser.uid && !peersRef.current[p.id] && localStreamRef.current) {
                     const shouldInitiate = currentUser.uid > p.id;
                     if (shouldInitiate) {
-                        const peer = new Peer({ initiator: true, trickle: false, stream: localStreamRef.current, config: { iceServers } });
+                        const peer = new Peer({ initiator: true, trickle: true, stream: localStreamRef.current, config: { iceServers } });
                         peersRef.current[p.id] = peer;
                         
                         peer.on('signal', offerSignal => {
                             addDoc(collection(db, `audioRooms/${roomId}/signals`), { to: p.id, from: currentUser.uid, signal: JSON.stringify(offerSignal) });
                         });
+                        
                         peer.on('stream', stream => setRemoteStreams(prev => [...prev.filter(s => s.peerId !== p.id), { peerId: p.id, stream }]));
+                        
+                        peer.on('error', (err) => {
+                            console.error(`Peer connection error with ${p.id}:`, err);
+                            toast({ title: 'Connection Error', description: `Could not connect to ${p.name || 'a user'}.`, variant: 'destructive'});
+                            peersRef.current[p.id]?.destroy();
+                        });
+
                         peer.on('close', () => {
                             delete peersRef.current[p.id];
                             setRemoteStreams(prev => prev.filter(s => s.peerId !== p.id));
@@ -307,8 +315,6 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
             Object.keys(peersRef.current).forEach(peerId => {
                 if (!participantIds.has(peerId)) {
                     peersRef.current[peerId]?.destroy();
-                    delete peersRef.current[peerId];
-                    setRemoteStreams(prev => prev.filter(s => s.peerId !== peerId));
                 }
             });
         }));
@@ -324,13 +330,21 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
                     if (signal.type === 'offer') {
                         if (peersRef.current[data.from] || !localStreamRef.current) return;
                         
-                        const peer = new Peer({ initiator: false, trickle: false, stream: localStreamRef.current, config: { iceServers } });
+                        const peer = new Peer({ initiator: false, trickle: true, stream: localStreamRef.current, config: { iceServers } });
                         peersRef.current[data.from] = peer;
 
                         peer.on('signal', answerSignal => {
                            addDoc(collection(db, `audioRooms/${roomId}/signals`), { to: data.from, from: currentUser.uid, signal: JSON.stringify(answerSignal) });
                         });
+
                         peer.on('stream', stream => setRemoteStreams(prev => [...prev.filter(s => s.peerId !== data.from), { peerId: data.from, stream }]));
+
+                        peer.on('error', (err) => {
+                            console.error(`Peer connection error with ${data.from}:`, err);
+                            toast({ title: 'Connection Error', description: `Could not connect to a user.`, variant: 'destructive'});
+                            peersRef.current[data.from]?.destroy();
+                        });
+
                         peer.on('close', () => {
                             delete peersRef.current[data.from];
                             setRemoteStreams(prev => prev.filter(s => s.peerId !== data.from));
