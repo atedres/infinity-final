@@ -127,7 +127,12 @@ export const useFloatingRoom = () => useContext(FloatingRoomContext);
 
 // Helper to set up all event handlers for a peer
 const setupPeerHandlers = (peer: PeerInstance, peerId: string, context: any) => {
-    const { setRemoteStreams, peersRef } = context;
+    const { setRemoteStreams, peersRef, toast } = context;
+
+    peer.on('signalerror', (err: Error) => {
+        console.error(`Peer signal error with ${peerId}:`, err);
+        toast({ title: "Connection Error", description: `Could not connect to a user in the room.`, variant: "destructive" });
+    });
 
     peer.on('stream', (stream: MediaStream) => {
         setRemoteStreams((prev: RemoteStream[]) => {
@@ -227,29 +232,43 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
     
     const leaveRoom = useCallback(async () => {
         if (!activeRoomId || !currentUser || !db) return;
-
+    
+        const roomIdForCleanup = activeRoomId;
+    
         cleanupRef.current?.();
         cleanupRef.current = undefined;
-
+    
         localStreamRef.current?.getTracks().forEach(track => track.stop());
         localStreamRef.current = null;
         Object.values(peersRef.current).forEach(peer => peer.destroy());
         peersRef.current = {};
-
+    
         try {
-            const participantRef = doc(db, "audioRooms", activeRoomId, "participants", currentUser.uid);
+            const participantRef = doc(db, "audioRooms", roomIdForCleanup, "participants", currentUser.uid);
             await deleteDoc(participantRef);
+    
+            // After deleting, check if the room is now empty.
+            const participantsCollectionRef = collection(db, "audioRooms", roomIdForCleanup, "participants");
+            const remainingParticipantsSnap = await getDocs(participantsCollectionRef);
+    
+            if (remainingParticipantsSnap.empty) {
+                // Last one out, delete the room.
+                const roomDocRef = doc(db, "audioRooms", roomIdForCleanup);
+                const roomSnap = await getDoc(roomDocRef);
+                if (roomSnap.exists()) {
+                    await deleteDoc(roomDocRef);
+                }
+            }
         } catch (error) {
-            console.warn("Could not delete participant on leave, room might have ended.", error);
+            console.warn("Could not execute leave-room cleanup operations.", error);
         }
-
-
+    
         setActiveRoomId(null);
         setRoomData(null);
         setParticipants([]);
         setRemoteStreams([]);
         setIsFloating(false);
-    }, [activeRoomId, currentUser]);
+    }, [activeRoomId, currentUser, db]);
 
 
     const joinRoom = useCallback(async (roomId: string) => {
@@ -322,6 +341,7 @@ export function FloatingRoomProvider({ children }: { children: React.ReactNode }
             // Connect to new participants
             newParticipants.forEach(p => {
                 if (p.id !== currentUser.uid && !peersRef.current[p.id] && localStreamRef.current) {
+                    // The user with the greater ID initiates the connection
                     const isInitiator = currentUser.uid > p.id;
                     if (isInitiator) {
                         const peer = new Peer({ initiator: true, trickle: false, stream: localStreamRef.current, config: { iceServers } });

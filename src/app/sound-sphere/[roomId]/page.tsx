@@ -191,7 +191,7 @@ export default function AudioRoomPage() {
     }, [chatMessages]);
 
     const handleLeaveRoom = async () => {
-        leaveRoom();
+        await leaveRoom();
         router.push('/sound-sphere?tab=rooms'); 
     };
 
