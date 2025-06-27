@@ -491,6 +491,10 @@ export default function AudioRoomPage() {
         return <SubpageLayout title="Sound Sphere Room" backHref="/sound-sphere?tab=rooms"><div className="text-center">Loading room...</div></SubpageLayout>;
     }
 
+    const handleLeaveAndGoBack = () => {
+        leaveRoom(true);
+    };
+
     const myParticipantData = participants.find(p => p.id === currentUser.uid);
     const myRole = myParticipantData?.role;
     const isModerator = myRole === 'creator' || myRole === 'moderator';
@@ -530,7 +534,7 @@ export default function AudioRoomPage() {
     const canManageSelectedUser = isModerator && selectedUser && selectedUser.id !== currentUser.uid;
 
     return (
-        <SubpageLayout title={roomData.title} backHref="/sound-sphere?tab=rooms" showTitle={false}>
+        <SubpageLayout onBackClick={handleLeaveAndGoBack} title={roomData.title} backHref="/sound-sphere?tab=rooms" showTitle={false}>
             {remoteStreams.map(rs => <AudioPlayer key={rs.peerId} stream={rs.stream} />)}
             <AlertDialog open={!!speakerInvitation}>
                 <AlertDialogContent>

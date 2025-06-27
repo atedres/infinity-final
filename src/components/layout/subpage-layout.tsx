@@ -1,3 +1,4 @@
+
 "use client";
 
 import { ArrowLeft, Home } from 'lucide-react';
@@ -5,11 +6,15 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { HeaderActions } from '@/components/layout/header-actions';
 
-export function SubpageLayout({ title, children, backHref, showTitle = true }: { title: string; children: React.ReactNode; backHref?: string; showTitle?: boolean; }) {
+export function SubpageLayout({ title, children, backHref, showTitle = true, onBackClick }: { title: string; children: React.ReactNode; backHref?: string; showTitle?: boolean; onBackClick?: () => void; }) {
   const router = useRouter();
 
   const handleBack = () => {
-    router.push(backHref || '/');
+    if (onBackClick) {
+      onBackClick();
+    } else {
+      router.push(backHref || '/');
+    }
   };
 
   return (
