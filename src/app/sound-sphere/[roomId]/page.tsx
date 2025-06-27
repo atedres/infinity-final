@@ -13,7 +13,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -21,7 +21,7 @@ import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetDescri
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 import { db, auth, storage } from "@/lib/firebase";
-import { Mic, MicOff, Hand, Check, X, Headphones, UserX, Link as LinkIcon, MoreVertical, Edit, ShieldCheck, TimerIcon, MessageSquareText, Send, Crown, Camera } from 'lucide-react';
+import { Mic, MicOff, Hand, Check, X, Headphones, UserX, Link as LinkIcon, MoreVertical, Edit, ShieldCheck, TimerIcon, MessageSquareText, Send, Crown, Camera, PhoneOff, LogOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ReactCrop, centerCrop, makeAspectCrop, type Crop, type PixelCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
@@ -60,11 +60,11 @@ export default function AudioRoomPage() {
     const params = useParams();
     const roomId = params.roomId as string;
     const { 
-        joinRoom, promptToLeave, leaveRoom, roomData, participants, speakingRequests,
+        joinRoom, promptToLeave, roomData, participants, speakingRequests,
         isMuted, myRole, canSpeak, hasRequested, speakerInvitation, elapsedTime,
         chatMessages, toggleMute, requestToSpeak, manageRequest, changeRole,
         acceptInvite, declineInvite, removeUser, selfPromoteToSpeaker,
-        pinLink, unpinLink, updateRoomTitle, sendChatMessage, handlePictureUpload,
+        pinLink, unpinLink, updateRoomTitle, sendChatMessage, handlePictureUpload, endRoomForAll
     } = useAudioRoom();
 
     const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -94,6 +94,7 @@ export default function AudioRoomPage() {
     const [newRoomTitleText, setNewRoomTitleText] = useState('');
     const [isChatOpen, setIsChatOpen] = useState(false);
     const [newChatMessage, setNewChatMessage] = useState('');
+    const [isEndRoomDialogOpen, setIsEndRoomDialogOpen] = useState(false);
     const chatMessagesEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -248,7 +249,21 @@ export default function AudioRoomPage() {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
-            <div className="mx-auto max-w-4xl space-y-8">
+            <AlertDialog open={isEndRoomDialogOpen} onOpenChange={setIsEndRoomDialogOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Are you sure you want to end the room?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This will end the session for everyone and the room will be deleted. This action cannot be undone.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={endRoomForAll} className="bg-destructive hover:bg-destructive/90">End Room</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+            <div className="mx-auto max-w-4xl space-y-8 pb-28">
                 <div className="text-left space-y-2">
                     <div className="flex items-center gap-2">
                         <h1 className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl font-headline">{roomData.title}</h1>
@@ -356,37 +371,95 @@ export default function AudioRoomPage() {
                         <form onSubmit={handlePinLinkSubmit} className="space-y-4"><div className="grid gap-4 py-4"><Input placeholder="https://example.com" value={linkToPinText} onChange={(e) => setLinkToPinText(e.target.value)}/></div><Button type="submit">Pin Link</Button></form>
                     </DialogContent>
                 </Dialog>
+            </div>
 
-                <div className="flex flex-wrap items-center justify-center gap-2">
-                    <Sheet open={isChatOpen} onOpenChange={setIsChatOpen}>
-                        <SheetTrigger asChild><Button variant="outline" className="sm:w-auto w-full"><MessageSquareText className="mr-2 h-5 w-5" /> Chat</Button></SheetTrigger>
-                        <SheetContent className="flex flex-col">
-                            <SheetHeader><SheetTitle>Live Chat</SheetTitle></SheetHeader>
-                            <ScrollArea className="flex-1 -mx-6 px-6 mt-4">
-                                <div className="space-y-4 pr-1 pb-4">
-                                    {chatMessages.map(msg => (
-                                        <div key={msg.id} className="flex items-start gap-3">
-                                             <Avatar className="h-8 w-8"><AvatarImage src={msg.senderAvatar} /><AvatarFallback>{msg.senderName?.[0]}</AvatarFallback></Avatar>
-                                            <div><p className="text-sm font-semibold">{msg.senderName}</p><p className="text-sm bg-muted p-2 rounded-lg mt-1">{msg.text}</p></div>
-                                        </div>
-                                    ))}
-                                    <div ref={chatMessagesEndRef} />
-                                </div>
-                            </ScrollArea>
-                            <form onSubmit={handleSendChatMessageSubmit} className="flex items-center gap-2 pt-4 border-t">
-                                <Textarea value={newChatMessage} onChange={(e) => setNewChatMessage(e.target.value)} placeholder="Send a message..." rows={1} className="min-h-0"/><Button type="submit" size="icon" disabled={!newChatMessage.trim()}><Send className="h-4 w-4"/></Button>
-                            </form>
-                        </SheetContent>
-                    </Sheet>
-                     {canSpeak ? (
-                        <Button variant={isMuted ? 'secondary' : 'outline'} onClick={toggleMute} className="w-28">{isMuted ? <MicOff className="mr-2 h-5 w-5" /> : <Mic className="mr-2 h-5 w-5" />} {isMuted ? 'Unmute' : 'Mute'}</Button>
-                     ) : (
-                        isOpenStage ? (
-                            <Button onClick={selfPromoteToSpeaker} variant="outline"><Mic className="mr-2 h-5 w-5" /> Become a Speaker</Button>
+            <div className="fixed bottom-0 left-0 right-0 z-10 border-t bg-background/80 p-4 backdrop-blur-sm">
+                <div className="container mx-auto flex max-w-4xl items-center justify-between gap-2 sm:gap-4">
+                    <Button variant="destructive" onClick={promptToLeave} className="px-3 sm:px-4">
+                        <PhoneOff className="h-4 w-4 sm:mr-2" />
+                        <span className="hidden sm:inline">Leave</span>
+                    </Button>
+            
+                    <div className="flex items-center gap-2">
+                        {canSpeak ? (
+                            <Button variant={isMuted ? 'secondary' : 'default'} onClick={toggleMute} size="icon" className="h-12 w-12 rounded-full">
+                                {isMuted ? <MicOff className="h-6 w-6" /> : <Mic className="h-6 w-6" />}
+                                <span className="sr-only">{isMuted ? 'Unmute' : 'Mute'}</span>
+                            </Button>
+                        ) : isOpenStage ? (
+                            <Button onClick={selfPromoteToSpeaker} variant="outline" className="px-3 sm:px-4">
+                                <Mic className="h-4 w-4 sm:mr-2" /> 
+                                <span className="hidden sm:inline">Become a Speaker</span>
+                                <span className="sm:hidden">Speak</span>
+                            </Button>
                         ) : (
-                            <Button onClick={requestToSpeak} disabled={hasRequested} variant="outline"><Hand className="mr-2 h-5 w-5" />{hasRequested ? 'Request Sent' : 'Request to Speak'}</Button>
-                        )
-                     )}
+                            <Button onClick={requestToSpeak} disabled={hasRequested} variant="outline" className="px-3 sm:px-4">
+                                <Hand className="h-4 w-4 sm:mr-2" />
+                                <span className="hidden sm:inline">{hasRequested ? 'Request Sent' : 'Request to Speak'}</span>
+                                <span className="sm:hidden">{hasRequested ? '...' : 'Speak'}</span>
+                            </Button>
+                        )}
+                    </div>
+            
+                    <div className="flex items-center gap-2">
+                        <Sheet open={isChatOpen} onOpenChange={setIsChatOpen}>
+                            <SheetTrigger asChild>
+                                <Button variant="outline" size="icon" className="h-10 w-10">
+                                    <MessageSquareText className="h-5 w-5" />
+                                    <span className="sr-only">Open Chat</span>
+                                </Button>
+                            </SheetTrigger>
+                            <SheetContent className="flex flex-col">
+                                <SheetHeader><SheetTitle>Live Chat</SheetTitle></SheetHeader>
+                                <ScrollArea className="flex-1 -mx-6 px-6 mt-4">
+                                    <div className="space-y-4 pr-1 pb-4">
+                                        {chatMessages.map(msg => (
+                                            <div key={msg.id} className="flex items-start gap-3">
+                                                 <Avatar className="h-8 w-8"><AvatarImage src={msg.senderAvatar} /><AvatarFallback>{msg.senderName?.[0]}</AvatarFallback></Avatar>
+                                                <div><p className="text-sm font-semibold">{msg.senderName}</p><p className="text-sm bg-muted p-2 rounded-lg mt-1">{msg.text}</p></div>
+                                            </div>
+                                        ))}
+                                        <div ref={chatMessagesEndRef} />
+                                    </div>
+                                </ScrollArea>
+                                <form onSubmit={handleSendChatMessageSubmit} className="flex items-center gap-2 pt-4 border-t">
+                                    <Textarea value={newChatMessage} onChange={(e) => setNewChatMessage(e.target.value)} placeholder="Send a message..." rows={1} className="min-h-0"/><Button type="submit" size="icon" disabled={!newChatMessage.trim()}><Send className="h-4 w-4"/></Button>
+                                </form>
+                            </SheetContent>
+                        </Sheet>
+        
+                        {isModerator && (
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button variant="outline" size="icon" className="h-10 w-10">
+                                        <MoreVertical className="h-5 w-5" />
+                                        <span className="sr-only">More actions</span>
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                    <DropdownMenuItem onSelect={() => setIsPinLinkDialogOpen(true)}>
+                                        <LinkIcon className="mr-2 h-4 w-4" />
+                                        <span>Pin Link</span>
+                                    </DropdownMenuItem>
+                                    {roomData.pinnedLink && (
+                                        <DropdownMenuItem onSelect={unpinLink}>
+                                            <X className="mr-2 h-4 w-4" />
+                                            <span>Unpin Link</span>
+                                        </DropdownMenuItem>
+                                    )}
+                                    {myRole === 'creator' && (
+                                        <>
+                                            <DropdownMenuSeparator />
+                                            <DropdownMenuItem onSelect={() => setIsEndRoomDialogOpen(true)} className="focus:bg-destructive/80 focus:text-destructive-foreground text-destructive">
+                                                <LogOut className="mr-2 h-4 w-4" />
+                                                <span>End Room for All</span>
+                                            </DropdownMenuItem>
+                                        </>
+                                    )}
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                        )}
+                    </div>
                 </div>
             </div>
 

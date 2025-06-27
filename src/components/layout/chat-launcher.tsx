@@ -14,7 +14,7 @@ import { db, auth, storage } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetFooter } from '@/components/ui/sheet';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogFooter } from "@/components/ui/alert-dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogHeader, AlertDialogFooter, AlertDialogTitle, AlertDialogDescription } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -64,6 +64,7 @@ interface AudioRoomContextType {
   joinRoom: (roomId: string) => void;
   leaveRoom: (options?: { navigate?: boolean }) => Promise<void>;
   promptToLeave: () => void;
+  endRoomForAll: () => void;
   toggleMute: () => void;
   requestToSpeak: () => void;
   manageRequest: (requesterId: string, accept: boolean) => void;
@@ -189,6 +190,13 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
         }
     }, [currentRoomId, currentUser, db, router]);
     
+    const sendSignal = async (to: string, chatId: string, signal: any, type: 'p2p-call' | 'room-offer' | 'room-answer') => {
+        if (!db || !currentUser) return;
+        await addDoc(collection(db, "signals"), {
+            from: currentUser.uid, fromName: currentUser.displayName, fromAvatar: currentUser.photoURL, to, chatId, signal: JSON.stringify(signal), type
+        });
+    };
+
     const joinRoom = useCallback(async (roomId: string) => {
         if (currentRoomId === roomId || !currentUser || !db) return;
         if (currentRoomId) await leaveRoom({ navigate: false }); // Leave previous room if any
@@ -217,26 +225,39 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
             }, { merge: true });
 
             const unsubs: (() => void)[] = [];
-            unsubs.push(onSnapshot(roomDocRef, (docSnap) => setRoomData(docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } as Room : null)));
+            unsubs.push(onSnapshot(roomDocRef, (docSnap) => {
+                if(docSnap.exists()) {
+                    setRoomData({ id: docSnap.id, ...docSnap.data() } as Room)
+                } else {
+                    toast({ title: "Room Ended", description: "The host has ended the room." });
+                    leaveRoom({ navigate: true });
+                }
+            }));
             unsubs.push(onSnapshot(collection(db, "audioRooms", roomId, "participants"), (snapshot) => {
                 const newParticipants = snapshot.docs.map(p => ({ id: p.id, ...p.data() } as Participant));
                 setParticipants(newParticipants);
                 
+                // --- New Robust Connection Logic ---
                 newParticipants.forEach(p => {
                     if (p.id !== currentUser.uid && !roomPeersRef.current[p.id] && roomLocalStreamRef.current) {
-                        if (currentUser.uid > p.id) { // Initiator logic
-                            const peer = new Peer({ initiator: true, stream: roomLocalStreamRef.current, config: { iceServers }, trickle: false });
+                        // The user with the greater ID initiates the connection.
+                        if (currentUser.uid > p.id) {
+                            const peer = new Peer({ initiator: true, stream: roomLocalStreamRef.current, trickle: false });
                             peer.on('signal', offer => sendSignal(p.id, roomId, offer, 'room-offer'));
                             peer.on('stream', stream => setRoomRemoteStreams(prev => [...prev.filter(s => s.peerId !== p.id), { peerId: p.id, stream }]));
                             peer.on('close', () => setRoomRemoteStreams(prev => prev.filter(s => s.peerId !== p.id)));
+                            peer.on('error', (err) => { console.error(`Peer error with ${p.id}:`, err); roomPeersRef.current[p.id]?.destroy(); delete roomPeersRef.current[p.id]; });
                             roomPeersRef.current[p.id] = peer;
                         }
                     }
                 });
+                
+                // Clean up peers for users who have left
                 Object.keys(roomPeersRef.current).forEach(peerId => {
                     if (!newParticipants.some(p => p.id === peerId)) {
                         roomPeersRef.current[peerId]?.destroy();
                         delete roomPeersRef.current[peerId];
+                        setRoomRemoteStreams(prev => prev.filter(s => s.peerId !== peerId));
                     }
                 });
             }));
@@ -247,7 +268,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
             roomUnsubscribes.current = unsubs;
         } catch (err) {
             console.error("Failed to join room:", err);
-            toast({ title: "Error", description: "Could not join room. Check permissions.", variant: "destructive" });
+            toast({ title: "Error", description: "Could not join room. Check microphone permissions.", variant: "destructive" });
         }
     }, [currentUser, db, toast, router, currentRoomId, leaveRoom]);
     
@@ -266,6 +287,25 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
     const myParticipantData = participants.find(p => p.id === currentUser?.uid);
     const myRole = myParticipantData?.role;
     const canSpeak = myRole === 'creator' || myRole === 'moderator' || myRole === 'speaker';
+
+    const endRoomForAll = useCallback(async () => {
+        if (!currentRoomId || !currentUser || !db) return;
+        const roomDocRef = doc(db, "audioRooms", currentRoomId);
+        const roomDocSnap = await getDoc(roomDocRef);
+        if(roomDocSnap.exists() && roomDocSnap.data().creatorId !== currentUser.uid) {
+            toast({ title: "Permission Denied", description: "Only the room creator can end the room.", variant: "destructive" });
+            return;
+        }
+    
+        try {
+            // Delete the room document. onSnapshot listeners on clients will handle their own cleanup.
+            await deleteDoc(roomDocRef);
+            toast({ title: "Room Ended", description: "The room has been closed for all participants." });
+        } catch (error) {
+            console.error("Error ending room for all:", error);
+            toast({ title: "Error", description: "Could not end the room.", variant: "destructive" });
+        }
+    }, [currentRoomId, currentUser, db, toast]);
 
     const toggleMute = async () => {
         if (!roomLocalStreamRef.current || !currentUser || !currentRoomId) return;
@@ -346,8 +386,8 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
               }}>
                 Keep Listening
               </ToastAction>
-              <ToastAction altText="Leave Room" onClick={() => {
-                leaveRoom({ navigate: true });
+              <ToastAction altText="Leave Room" onClick={async () => {
+                await leaveRoom({ navigate: true });
                 dismiss();
               }} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
                 Leave Room
@@ -357,7 +397,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
         });
       };
       
-    // --- P2P Chat/Call Logic (existing logic from original file) ---
+    // --- P2P Chat/Call Logic ---
     useEffect(() => {
         if (typeof window === 'undefined') return;
         if (!incomingCallAudioRef.current) { incomingCallAudioRef.current = new Audio('/incoming-call.mp3'); incomingCallAudioRef.current.loop = true; }
@@ -374,35 +414,29 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
         return stopAll; 
     }, [p2pCallState]);
 
-    const sendSignal = async (to: string, chatId: string, signal: any, type: 'p2p' | 'room-offer' | 'room-answer') => {
-        if (!db || !currentUser) return;
-        await addDoc(collection(db, "p2p_signals"), {
-            from: currentUser.uid, fromName: currentUser.displayName, fromAvatar: currentUser.photoURL, to, chatId, signal: JSON.stringify(signal), type
-        });
-    };
-
     useEffect(() => {
-        if (!currentUser || !db) return;
-        const signalsQuery = query(collection(db, "p2p_signals"), where("to", "==", currentUser.uid));
+        if (!currentUser || !db || !currentRoomId) return;
+        const signalsQuery = query(collection(db, "signals"), where("to", "==", currentUser.uid));
         const unsubscribe = onSnapshot(signalsQuery, (snapshot) => {
             snapshot.docChanges().forEach(async (change) => {
                 if (change.type === 'added') {
                     const data = change.doc.data();
                     const signal = JSON.parse(data.signal);
                     
-                    if (data.type === 'p2p' && signal.type === 'offer' && callStateRef.current === 'idle') {
+                    if (data.type === 'p2p-call' && signal.type === 'offer' && callStateRef.current === 'idle') {
                         setIncomingCall({ fromId: data.from, fromName: data.fromName, fromAvatar: data.fromAvatar, chatId: data.chatId, signal: data.signal, });
                         setP2PCallState('receiving');
-                    } else if (data.type === 'p2p' && signal.type === 'answer' && callStateRef.current === 'calling') {
+                    } else if (data.type === 'p2p-call' && signal.type === 'answer' && callStateRef.current === 'calling') {
                         p2pPeerRef.current?.signal(signal);
-                    } else if (data.type === 'p2p' && signal.type === 'end-call') {
+                    } else if (data.type === 'p2p-call' && signal.type === 'end-call') {
                          if (callStateRef.current !== 'idle') { toast({ title: 'Call Ended' }); endP2PCall(false); }
                     } else if (data.type === 'room-offer') {
                         if (!roomLocalStreamRef.current || !currentRoomId) return;
-                        const peer = new Peer({ initiator: false, stream: roomLocalStreamRef.current, config: { iceServers }, trickle: false });
+                        const peer = new Peer({ initiator: false, stream: roomLocalStreamRef.current, trickle: false });
                         peer.on('signal', answer => sendSignal(data.from, currentRoomId, answer, 'room-answer'));
                         peer.on('stream', stream => setRoomRemoteStreams(prev => [...prev.filter(s => s.peerId !== data.from), { peerId: data.from, stream }]));
                         peer.on('close', () => setRoomRemoteStreams(prev => prev.filter(s => s.peerId !== data.from)));
+                        peer.on('error', (err) => { console.error(`Peer error with ${data.from}:`, err); roomPeersRef.current[data.from]?.destroy(); delete roomPeersRef.current[data.from]; });
                         peer.signal(signal);
                         roomPeersRef.current[data.from] = peer;
                     } else if (data.type === 'room-answer') {
@@ -449,7 +483,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
     }
     const endP2PCall = async (notifyPeer = true) => {
         if (notifyPeer && p2pPeerRef.current?.destroyed === false && selectedChat && currentUser) {
-            await sendSignal(selectedChat.otherParticipant.id, selectedChat.id, { type: 'end-call' }, 'p2p');
+            await sendSignal(selectedChat.otherParticipant.id, selectedChat.id, { type: 'end-call' }, 'p2p-call');
         }
         p2pPeerRef.current?.destroy(); p2pPeerRef.current = null;
         p2pLocalStreamRef.current?.getTracks().forEach(track => track.stop()); p2pLocalStreamRef.current = null;
@@ -459,9 +493,9 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
         if (!currentUser || !db) return;
         const stream = await getMicStream(); if (!stream) { setP2PCallState('idle'); return; }
         p2pLocalStreamRef.current = stream; setP2PCallState('calling');
-        const peer = new Peer({ initiator: true, trickle: true, stream: stream, config: { iceServers } });
+        const peer = new Peer({ initiator: true, trickle: false, stream: stream, config: { iceServers } });
         p2pPeerRef.current = peer;
-        peer.on('signal', (signal) => sendSignal(chat.otherParticipant.id, chat.id, signal, 'p2p'));
+        peer.on('signal', (signal) => sendSignal(chat.otherParticipant.id, chat.id, signal, 'p2p-call'));
         peer.on('stream', (remoteStream) => { setP2PRemoteStream(remoteStream); setP2PCallState('active'); });
         peer.on('close', () => endP2PCall(false));
         peer.on('error', (err) => { toast({ title: "Call Error", variant: "destructive" }); endP2PCall(false); });
@@ -470,11 +504,11 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
         if (!currentUser || !db || !incomingCall) return;
         const stream = await getMicStream(); if (!stream) { endP2PCall(false); declineP2PCall(); return; }
         p2pLocalStreamRef.current = stream;
-        const peer = new Peer({ initiator: false, trickle: true, stream: stream, config: { iceServers } });
+        const peer = new Peer({ initiator: false, trickle: false, stream: stream, config: { iceServers } });
         p2pPeerRef.current = peer;
         const chatWithCaller = conversations.find(c => c.id === incomingCall.chatId); setSelectedChat(chatWithCaller || null);
         setP2PCallState('active');
-        peer.on('signal', (signal) => sendSignal(incomingCall.fromId, incomingCall.chatId, signal, 'p2p'));
+        peer.on('signal', (signal) => sendSignal(incomingCall.fromId, incomingCall.chatId, signal, 'p2p-call'));
         peer.on('stream', (remoteStream) => setP2PRemoteStream(remoteStream));
         peer.on('close', () => endP2PCall(false));
         peer.on('error', (err) => endP2PCall(false));
@@ -482,7 +516,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
         setIncomingCall(null);
     };
     const declineP2PCall = async () => {
-        if (incomingCall) await sendSignal(incomingCall.fromId, incomingCall.chatId, { type: 'end-call' }, 'p2p');
+        if (incomingCall) await sendSignal(incomingCall.fromId, incomingCall.chatId, { type: 'end-call' }, 'p2p-call');
         setIncomingCall(null); setP2PCallState('idle');
     };
     const toggleP2PMute = () => { if (p2pLocalStreamRef.current) { const track = p2pLocalStreamRef.current.getAudioTracks()[0]; if(track) {track.enabled = !track.enabled; setIsP2PMuted(!track.enabled);} } };
@@ -504,7 +538,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
     const P2PCallDialog = () => { /* ... JSX for P2P call dialog ... */ return <></> };
 
     return (
-        <AudioRoomContext.Provider value={{ roomData, participants, speakingRequests, chatMessages: roomChatMessages, speakerInvitation, isMuted: roomIsMuted, myRole, canSpeak, hasRequested, elapsedTime, joinRoom, leaveRoom, promptToLeave, toggleMute, requestToSpeak, manageRequest, changeRole, acceptInvite, declineInvite, removeUser, selfPromoteToSpeaker, pinLink, unpinLink, updateRoomTitle, sendChatMessage, handlePictureUpload }}>
+        <AudioRoomContext.Provider value={{ roomData, participants, speakingRequests, chatMessages: roomChatMessages, speakerInvitation, isMuted: roomIsMuted, myRole, canSpeak, hasRequested, elapsedTime, joinRoom, leaveRoom, promptToLeave, endRoomForAll, toggleMute, requestToSpeak, manageRequest, changeRole, acceptInvite, declineInvite, removeUser, selfPromoteToSpeaker, pinLink, unpinLink, updateRoomTitle, sendChatMessage, handlePictureUpload }}>
             {children}
             {roomRemoteStreams.map(rs => <AudioPlayer key={rs.peerId} stream={rs.stream} />)}
             {p2pRemoteStream && <AudioPlayer stream={p2pRemoteStream} />}
