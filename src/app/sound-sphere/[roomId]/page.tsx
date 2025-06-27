@@ -1,12 +1,10 @@
 
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useState, useEffect, useRef } from 'react';
+import { useParams } from 'next/navigation';
 import { onAuthStateChanged, User, updateProfile } from 'firebase/auth';
-import { doc, setDoc, deleteDoc, updateDoc, writeBatch, deleteField, serverTimestamp, getDoc, query, orderBy, onSnapshot, addDoc, collection, getDocs, Timestamp, where } from 'firebase/firestore';
-import Peer from 'simple-peer';
-import type { Instance as PeerInstance } from 'simple-peer';
+import { writeBatch, deleteField, serverTimestamp, doc, getDoc, updateDoc, collection, addDoc, deleteDoc } from 'firebase/firestore';
 import 'webrtc-adapter';
 
 import { SubpageLayout } from "@/components/layout/subpage-layout";
@@ -14,81 +12,20 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger, SheetDescription } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 import { db, auth, storage } from "@/lib/firebase";
-import { Mic, MicOff, LogOut, XCircle, Hand, Check, X, Users, Headphones, UserPlus, UserCheck, MessageSquare, UserX, Link as LinkIcon, MoreVertical, Edit, ShieldCheck, TimerIcon, MessageSquareText, Send, Crown, Camera } from 'lucide-react';
+import { Mic, MicOff, Hand, Check, X, Headphones, UserX, Link as LinkIcon, MoreVertical, Edit, ShieldCheck, TimerIcon, MessageSquareText, Send, Crown, Camera } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ReactCrop, centerCrop, makeAspectCrop, type Crop, type PixelCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
+import { useAudioRoom, type Participant, type SpeakRequest, type RoomChatMessage } from '@/components/layout/chat-launcher';
 
-
-// Types
-interface Room {
-    id: string;
-    title: string;
-    description: string;
-    creatorId: string;
-    pinnedLink?: string;
-    roles?: { [key: string]: 'speaker' | 'moderator' };
-    createdAt: Timestamp;
-}
-
-interface Participant {
-    id: string;
-    name: string;
-    avatar: string;
-    isMuted: boolean;
-    role: 'creator' | 'moderator' | 'speaker' | 'listener';
-}
-
-interface SpeakRequest {
-    id: string;
-    name: string;
-    avatar: string;
-}
-
-interface RemoteStream {
-    peerId: string;
-    stream: MediaStream;
-}
-
-interface RoomChatMessage {
-    id: string;
-    text: string;
-    senderId: string;
-    senderName: string;
-    senderAvatar: string;
-    createdAt: Timestamp;
-}
-
-interface SpeakerInvitation {
-    inviterId: string;
-    inviterName: string;
-}
-
-interface ProfileStats {
-    posts: number;
-    followers: number;
-    following: number;
-}
-
-
-const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
-
-const AudioPlayer = ({ stream }: { stream: MediaStream }) => {
-    const ref = useRef<HTMLAudioElement>(null);
-    useEffect(() => {
-        if (ref.current) ref.current.srcObject = stream;
-    }, [stream]);
-    return <audio ref={ref} autoPlay playsInline />;
-};
 
 // Helper functions for image cropping
 function canvasPreview(image: HTMLImageElement, canvas: HTMLCanvasElement, crop: PixelCrop) {
@@ -119,27 +56,17 @@ function toBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
 
 export default function AudioRoomPage() {
     const { toast } = useToast();
-    const router = useRouter();
     const params = useParams();
     const roomId = params.roomId as string;
+    const { 
+        joinRoom, promptToLeave, leaveRoom, roomData, participants, speakingRequests,
+        isMuted, myRole, canSpeak, hasRequested, speakerInvitation, elapsedTime,
+        chatMessages, toggleMute, requestToSpeak, manageRequest, changeRole,
+        acceptInvite, declineInvite, removeUser, selfPromoteToSpeaker,
+        pinLink, unpinLink, updateRoomTitle, sendChatMessage, handlePictureUpload,
+    } = useAudioRoom();
 
     const [currentUser, setCurrentUser] = useState<User | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
-
-    // Room State
-    const [roomData, setRoomData] = useState<Room | null>(null);
-    const [participants, setParticipants] = useState<Participant[]>([]);
-    const [speakingRequests, setSpeakingRequests] = useState<SpeakRequest[]>([]);
-    const [isMuted, setIsMuted] = useState(true);
-    const [hasRequested, setHasRequested] = useState(false);
-    const [speakerInvitation, setSpeakerInvitation] = useState<SpeakerInvitation | null>(null);
-    const [elapsedTime, setElapsedTime] = useState('00:00');
-    const [chatMessages, setChatMessages] = useState<RoomChatMessage[]>([]);
-    
-    // WebRTC State
-    const localStreamRef = useRef<MediaStream | null>(null);
-    const peersRef = useRef<Record<string, PeerInstance>>({});
-    const [remoteStreams, setRemoteStreams] = useState<RemoteStream[]>([]);
 
     // In-room profile editing refs
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -161,249 +88,46 @@ export default function AudioRoomPage() {
     const [crop, setCrop] = useState<Crop>();
     const [completedCrop, setCompletedCrop] = useState<PixelCrop>();
     const [isPinLinkDialogOpen, setIsPinLinkDialogOpen] = useState(false);
-    const [linkToPin, setLinkToPin] = useState('');
+    const [linkToPinText, setLinkToPinText] = useState('');
     const [isTitleEditDialogOpen, setIsTitleEditDialogOpen] = useState(false);
-    const [newRoomTitle, setNewRoomTitle] = useState('');
+    const [newRoomTitleText, setNewRoomTitleText] = useState('');
     const [isChatOpen, setIsChatOpen] = useState(false);
     const [newChatMessage, setNewChatMessage] = useState('');
     const chatMessagesEndRef = useRef<HTMLDivElement>(null);
-    const [isLeaveAlertOpen, setIsLeaveAlertOpen] = useState(false);
-    const [isEndAlertOpen, setIsEndAlertOpen] = useState(false);
 
     useEffect(() => {
         const authUnsubscribe = onAuthStateChanged(auth, (user) => {
-            if (user) {
-                setCurrentUser(user);
-            } else {
-                toast({ title: "Authentication required", description: "Please log in to join a room." });
-                router.push('/sound-sphere');
-            }
-            setIsLoading(false);
+            setCurrentUser(user);
         });
         return () => authUnsubscribe();
-    }, [router, toast]);
+    }, []);
     
-    const leaveRoom = useCallback(async (isRedirecting = true) => {
-        if (!roomId || !currentUser || !db) return;
-
-        // Destroy peers and streams
-        Object.values(peersRef.current).forEach(peer => peer.destroy());
-        peersRef.current = {};
-        localStreamRef.current?.getTracks().forEach(track => track.stop());
-        localStreamRef.current = null;
-        setRemoteStreams([]);
-
-        // Delete participant document
-        const participantRef = doc(db, "audioRooms", roomId, "participants", currentUser.uid);
-        await deleteDoc(participantRef);
-
-        const remainingParticipantsSnap = await getDocs(collection(db, "audioRooms", roomId, "participants"));
-        if (remainingParticipantsSnap.empty) {
-            await deleteDoc(doc(db, "audioRooms", roomId));
-        }
-
-        if (isRedirecting) {
-            router.push('/sound-sphere?tab=rooms');
-        }
-    }, [roomId, currentUser, db, router]);
-
-
-    // Main effect for joining room and setting up listeners
     useEffect(() => {
-        if (!currentUser || !roomId || !db) return;
-
-        let allUnsubscribes: (() => void)[] = [];
-
-        const join = async () => {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-            localStreamRef.current = stream;
-
-            const roomDocRef = doc(db, "audioRooms", roomId);
-            const roomSnap = await getDoc(roomDocRef);
-            if (!roomSnap.exists()) {
-                toast({ title: "Room not found or has ended." });
-                router.push('/sound-sphere?tab=rooms');
-                return;
-            }
-
-            const initialRoomData = roomSnap.data() as Room;
-            const myRole = initialRoomData.creatorId === currentUser.uid ? 'creator' : (initialRoomData.roles?.[currentUser.uid] || 'listener');
-            const initialMute = myRole === 'listener';
-            setIsMuted(initialMute);
-            if(localStreamRef.current) localStreamRef.current.getAudioTracks().forEach(t => t.enabled = !initialMute);
-
-            await setDoc(doc(db, "audioRooms", roomId, "participants", currentUser.uid), {
-                name: currentUser.displayName, avatar: currentUser.photoURL, isMuted: initialMute, role: myRole,
-            }, { merge: true });
-
-            allUnsubscribes.push(onSnapshot(roomDocRef, (docSnap) => {
-                if (!docSnap.exists()) {
-                    leaveRoom(); return;
-                }
-                setRoomData({ id: docSnap.id, ...docSnap.data() } as Room);
-                setNewRoomTitle(docSnap.data()?.title || '');
-            }));
-
-            const participantsColRef = collection(db, "audioRooms", roomId, "participants");
-            allUnsubscribes.push(onSnapshot(participantsColRef, (snapshot) => {
-                const newParticipants = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Participant));
-                setParticipants(newParticipants);
-
-                const currentPeerIds = Object.keys(peersRef.current);
-                const newParticipantIds = new Set(newParticipants.map(p => p.id));
-
-                newParticipants.forEach(p => {
-                    if (p.id !== currentUser.uid && !peersRef.current[p.id] && localStreamRef.current) {
-                        const isInitiator = currentUser.uid > p.id;
-                        if (isInitiator) {
-                            const peer = new Peer({ initiator: true, trickle: false, stream: localStreamRef.current, config: { iceServers } });
-                            peer.on('signal', offerSignal => addDoc(collection(db, `audioRooms/${roomId}/signals`), { to: p.id, from: currentUser.uid, signal: JSON.stringify(offerSignal) }));
-                            peer.on('stream', stream => setRemoteStreams(prev => [...prev, { peerId: p.id, stream }]));
-                            peer.on('close', () => setRemoteStreams(prev => prev.filter(s => s.peerId !== p.id)));
-                            peersRef.current[p.id] = peer;
-                        }
-                    }
-                });
-                currentPeerIds.forEach(peerId => {
-                    if (!newParticipantIds.has(peerId)) {
-                        peersRef.current[peerId]?.destroy();
-                        delete peersRef.current[peerId];
-                    }
-                });
-            }));
-            
-            const signalsQuery = query(collection(db, `audioRooms/${roomId}/signals`), where("to", "==", currentUser.uid));
-            allUnsubscribes.push(onSnapshot(signalsQuery, (snapshot) => {
-                snapshot.docChanges().forEach(async (change) => {
-                    if (change.type === 'added') {
-                        const data = change.doc.data();
-                        const signal = JSON.parse(data.signal);
-                        const fromId = data.from;
-                        if (signal.type === 'offer') {
-                            if (peersRef.current[fromId] || !localStreamRef.current) return;
-                            const peer = new Peer({ initiator: false, trickle: false, stream: localStreamRef.current, config: { iceServers } });
-                            peer.on('signal', answerSignal => addDoc(collection(db, `audioRooms/${roomId}/signals`), { to: fromId, from: currentUser.uid, signal: JSON.stringify(answerSignal) }));
-                            peer.on('stream', stream => setRemoteStreams(prev => [...prev.filter(s => s.peerId !== fromId), { peerId: fromId, stream }]));
-                            peer.on('close', () => setRemoteStreams(prev => prev.filter(s => s.peerId !== fromId)));
-                            peersRef.current[fromId] = peer;
-                            peer.signal(signal);
-                        } else if (signal.type === 'answer') {
-                            peersRef.current[fromId]?.signal(signal);
-                        }
-                        await deleteDoc(change.doc.ref);
-                    }
-                });
-            }));
-            
-            allUnsubscribes.push(onSnapshot(collection(db, "audioRooms", roomId, "requests"), s => setSpeakingRequests(s.docs.map(d => ({ id: d.id, ...d.data() } as SpeakRequest)))));
-            allUnsubscribes.push(onSnapshot(query(collection(db, "audioRooms", roomId, "chatMessages"), orderBy("createdAt", "asc")), s => setChatMessages(s.docs.map(d => ({ id: d.id, ...d.data() } as RoomChatMessage)))));
-            allUnsubscribes.push(onSnapshot(doc(db, "audioRooms", roomId, "invitations", currentUser.uid), d => setSpeakerInvitation(d.exists() ? d.data() as SpeakerInvitation : null)));
-
-            getDoc(doc(db, "audioRooms", roomId, "requests", currentUser.uid)).then(snap => setHasRequested(snap.exists()));
-        };
-
-        join();
-
-        return () => {
-            allUnsubscribes.forEach(unsub => unsub());
-            leaveRoom(false);
-        };
-    }, [currentUser, roomId, db, router, toast, leaveRoom]);
+        if (roomId && currentUser) {
+            joinRoom(roomId);
+        }
+    }, [roomId, currentUser, joinRoom]);
     
-    // Auto-moderator promotion logic
-    useEffect(() => {
-        if (participants.length === 0 || !roomData || !db || !currentUser) return;
-        const admins = participants.filter(p => p.role === 'creator' || p.role === 'moderator');
-        if (admins.length > 0) return;
-        const speakers = participants.filter(p => p.role === 'speaker');
-        if (speakers.length > 0) {
-            const newModerator = speakers[0];
-            if (roomData.roles?.[newModerator.id] !== 'moderator') {
-                updateDoc(doc(db, "audioRooms", roomId, "participants", newModerator.id), { role: 'moderator' });
-            }
-        }
-    }, [participants, roomData, db, roomId, currentUser]);
+    useEffect(() => { 
+        if (roomData) setNewRoomTitleText(roomData.title);
+    }, [roomData]);
 
     useEffect(() => { chatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
-    useEffect(() => {
-        if (!roomData?.createdAt) return;
-        const interval = setInterval(() => {
-            const diff = new Date().getTime() - roomData.createdAt.toDate().getTime();
-            const h = Math.floor(diff / (1000 * 60 * 60));
-            const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-            const s = Math.floor((diff % (1000 * 60)) / 1000);
-            setElapsedTime(h > 0 ? `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`);
-        }, 1000);
-        return () => clearInterval(interval);
-    }, [roomData?.createdAt]);
 
-    const handleEndRoom = async () => { await deleteDoc(doc(db, "audioRooms", roomId)); leaveRoom(); };
-    const toggleMute = async () => {
-        if (!localStreamRef.current || !currentUser) return;
-        const newMutedState = !isMuted;
-        localStreamRef.current.getAudioTracks().forEach(track => track.enabled = !newMutedState);
-        setIsMuted(newMutedState);
-        await updateDoc(doc(db, "audioRooms", roomId, "participants", currentUser.uid), { isMuted: newMutedState });
-    };
-    const requestToSpeak = async () => {
-        if (!currentUser) return;
-        await setDoc(doc(db, "audioRooms", roomId, "requests", currentUser.uid), { name: currentUser.displayName, avatar: currentUser.photoURL });
-        setHasRequested(true);
-        toast({ title: "Request Sent" });
-    };
-    const manageRequest = async (requesterId: string, accept: boolean) => {
-        await deleteDoc(doc(db, "audioRooms", roomId, "requests", requesterId));
-        if (accept && currentUser) {
-            await setDoc(doc(db, "audioRooms", roomId, "invitations", requesterId), { inviterId: currentUser.uid, inviterName: currentUser.displayName });
-        }
-    };
-    const changeRole = async (targetId: string, newRole: 'moderator' | 'speaker' | 'listener') => {
-        await updateDoc(doc(db, "audioRooms", roomId, "participants", targetId), { role: newRole, isMuted: newRole === 'listener' });
-        toast({ title: "Role Updated" });
-    };
-    const acceptInvite = async () => {
-        if (!currentUser) return;
-        await updateDoc(doc(db, "audioRooms", roomId, "participants", currentUser.uid), { role: 'speaker', isMuted: false });
-        await deleteDoc(doc(db, "audioRooms", roomId, "invitations", currentUser.uid));
-        setIsMuted(false);
-        if (localStreamRef.current) localStreamRef.current.getAudioTracks().forEach(t => t.enabled = true);
-        toast({ title: "You are now a speaker!" });
-    };
-    const declineInvite = async () => {
-        if (!currentUser) return;
-        await deleteDoc(doc(db, "audioRooms", roomId, "invitations", currentUser.uid));
-    };
-    const removeUser = async (targetId: string) => {
-        if (!currentUser) return;
-        const batch = writeBatch(db);
-        batch.set(doc(db, "audioRooms", roomId, "bannedUsers", targetId), { bannedAt: serverTimestamp(), bannedBy: currentUser.uid });
-        batch.delete(doc(db, "audioRooms", roomId, "participants", targetId));
-        await batch.commit();
-        toast({ title: "User Banned" });
-    };
-    const selfPromoteToSpeaker = async () => {
-        if (!currentUser) return;
-        await updateDoc(doc(db, "audioRooms", roomId, "participants", currentUser.uid), { role: 'speaker', isMuted: false });
-        setIsMuted(false);
-        if (localStreamRef.current) localStreamRef.current.getAudioTracks().forEach(t => t.enabled = true);
-    };
-    const pinLink = async (e: React.FormEvent) => {
+    const handlePinLinkSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        await updateDoc(doc(db, "audioRooms", roomId), { pinnedLink: linkToPin });
+        pinLink(linkToPinText);
         setIsPinLinkDialogOpen(false);
-        setLinkToPin('');
-        toast({ title: "Link Pinned" });
+        setLinkToPinText('');
     };
-    const unpinLink = async () => await updateDoc(doc(db, "audioRooms", roomId), { pinnedLink: deleteField() });
-    const updateRoomTitle = async (e: React.FormEvent) => {
+    const handleUpdateRoomTitleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        await updateDoc(doc(db, "audioRooms", roomId), { title: newRoomTitle });
+        updateRoomTitle(newRoomTitleText);
         setIsTitleEditDialogOpen(false);
     };
-    const sendChatMessage = async (e: React.FormEvent) => {
+    const handleSendChatMessageSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!currentUser || !newChatMessage.trim()) return;
-        await addDoc(collection(db, "audioRooms", roomId, "chatMessages"), { text: newChatMessage, senderId: currentUser.uid, senderName: currentUser.displayName, senderAvatar: currentUser.photoURL, createdAt: serverTimestamp() });
+        sendChatMessage(newChatMessage);
         setNewChatMessage('');
     };
 
@@ -428,7 +152,9 @@ export default function AudioRoomPage() {
         const newDisplayName = `${editedFirstName} ${editedLastName}`;
         const batch = writeBatch(db);
         batch.update(doc(db, "users", currentUser.uid), { firstName: editedFirstName, lastName: editedLastName, role: editedRole, bio: editedBio });
-        batch.update(doc(db, "audioRooms", roomId, "participants", currentUser.uid), { name: newDisplayName });
+        if (roomData) {
+          batch.update(doc(db, "audioRooms", roomData.id, "participants", currentUser.uid), { name: newDisplayName });
+        }
         await batch.commit();
         await updateProfile(currentUser, { displayName: newDisplayName });
         setOwnProfileDetails(prev => prev ? { ...prev, firstName: editedFirstName, lastName: editedLastName, role: editedRole, bio: editedBio } : null);
@@ -464,41 +190,15 @@ export default function AudioRoomPage() {
         if (!blob) return;
         const file = new File([blob], `profile_${currentUser?.uid || Date.now()}.png`, { type: 'image/png' });
         await handlePictureUpload(file);
+        setOwnProfileData(prev => prev ? { ...prev, avatar: URL.createObjectURL(file) } : null);
         setIsCropDialogOpen(false);
     };
 
-    const handlePictureUpload = async (file: File) => {
-        if (!storage || !currentUser || !db) return;
-        const filePath = `profile-pictures/${currentUser.uid}/${Date.now()}-${file.name}`;
-        const fileRef = storageRef(storage, filePath);
-        try {
-            toast({ title: 'Uploading...' });
-            const uploadResult = await uploadBytes(fileRef, file);
-            const photoURL = await getDownloadURL(uploadResult.ref);
-            await updateProfile(currentUser, { photoURL });
-            const batch = writeBatch(db);
-            batch.update(doc(db, "users", currentUser.uid), { photoURL });
-            batch.update(doc(db, "audioRooms", roomId, "participants", currentUser.uid), { avatar: photoURL });
-            await batch.commit();
-            setOwnProfileData(prev => prev ? { ...prev, avatar: photoURL } : null);
-            toast({ title: 'Success!', description: 'Profile picture updated.' });
-        } catch (error: any) {
-            toast({ title: 'Upload Failed', variant: 'destructive' });
-        }
-    };
-
-    if (isLoading || !roomData || !currentUser) {
-        return <SubpageLayout title="Sound Sphere Room" backHref="/sound-sphere?tab=rooms"><div className="text-center">Loading room...</div></SubpageLayout>;
+    if (!roomData || !currentUser) {
+        return <SubpageLayout title="Sound Sphere Room" backHref="/sound-sphere?tab=rooms"><div className="text-center">Joining room...</div></SubpageLayout>;
     }
 
-    const handleLeaveAndGoBack = () => {
-        leaveRoom(true);
-    };
-
-    const myParticipantData = participants.find(p => p.id === currentUser.uid);
-    const myRole = myParticipantData?.role;
     const isModerator = myRole === 'creator' || myRole === 'moderator';
-    const canSpeak = isModerator || myRole === 'speaker';
     
     const speakers = participants.filter(p => p.role === 'creator' || p.role === 'moderator' || p.role === 'speaker');
     const listeners = participants.filter(p => p.role === 'listener');
@@ -534,8 +234,7 @@ export default function AudioRoomPage() {
     const canManageSelectedUser = isModerator && selectedUser && selectedUser.id !== currentUser.uid;
 
     return (
-        <SubpageLayout onBackClick={handleLeaveAndGoBack} title={roomData.title} backHref="/sound-sphere?tab=rooms" showTitle={false}>
-            {remoteStreams.map(rs => <AudioPlayer key={rs.peerId} stream={rs.stream} />)}
+        <SubpageLayout onBackClick={promptToLeave} title={roomData.title} backHref="/sound-sphere?tab=rooms" showTitle={false}>
             <AlertDialog open={!!speakerInvitation}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
@@ -557,8 +256,8 @@ export default function AudioRoomPage() {
                                 <DialogTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8"><Edit className="h-5 w-5" /></Button></DialogTrigger>
                                 <DialogContent>
                                     <DialogHeader><DialogTitle>Edit Room Title</DialogTitle></DialogHeader>
-                                    <form onSubmit={updateRoomTitle} className="space-y-4">
-                                        <Input value={newRoomTitle} onChange={(e) => setNewRoomTitle(e.target.value)} />
+                                    <form onSubmit={handleUpdateRoomTitleSubmit} className="space-y-4">
+                                        <Input value={newRoomTitleText} onChange={(e) => setNewRoomTitleText(e.target.value)} />
                                         <DialogFooter><Button type="submit">Save Changes</Button></DialogFooter>
                                     </form>
                                 </DialogContent>
@@ -653,7 +352,7 @@ export default function AudioRoomPage() {
                 <Dialog open={isPinLinkDialogOpen} onOpenChange={setIsPinLinkDialogOpen}>
                     <DialogContent>
                         <DialogHeader><DialogTitle>Pin a Link</DialogTitle><DialogDescription>Share a relevant link with everyone in the room. It will appear at the top.</DialogDescription></DialogHeader>
-                        <form onSubmit={pinLink}><div className="grid gap-4 py-4"><Input placeholder="https://example.com" value={linkToPin} onChange={(e) => setLinkToPin(e.target.value)}/></div><Button type="submit">Pin Link</Button></form>
+                        <form onSubmit={handlePinLinkSubmit} className="space-y-4"><div className="grid gap-4 py-4"><Input placeholder="https://example.com" value={linkToPinText} onChange={(e) => setLinkToPinText(e.target.value)}/></div><Button type="submit">Pin Link</Button></form>
                     </DialogContent>
                 </Dialog>
 
@@ -673,16 +372,13 @@ export default function AudioRoomPage() {
                                     <div ref={chatMessagesEndRef} />
                                 </div>
                             </ScrollArea>
-                            <form onSubmit={sendChatMessage} className="flex items-center gap-2 pt-4 border-t">
+                            <form onSubmit={handleSendChatMessageSubmit} className="flex items-center gap-2 pt-4 border-t">
                                 <Textarea value={newChatMessage} onChange={(e) => setNewChatMessage(e.target.value)} placeholder="Send a message..." rows={1} className="min-h-0"/><Button type="submit" size="icon" disabled={!newChatMessage.trim()}><Send className="h-4 w-4"/></Button>
                             </form>
                         </SheetContent>
                     </Sheet>
                      {canSpeak ? (
-                        <>
-                            <Button variant={isMuted ? 'secondary' : 'outline'} onClick={toggleMute} className="w-28">{isMuted ? <MicOff className="mr-2 h-5 w-5" /> : <Mic className="mr-2 h-5 w-5" />} {isMuted ? 'Unmute' : 'Mute'}</Button>
-                            <Button variant="outline" onClick={() => setIsPinLinkDialogOpen(true)}><LinkIcon className="mr-2 h-5 w-5" /> Pin Link</Button>
-                        </>
+                        <Button variant={isMuted ? 'secondary' : 'outline'} onClick={toggleMute} className="w-28">{isMuted ? <MicOff className="mr-2 h-5 w-5" /> : <Mic className="mr-2 h-5 w-5" />} {isMuted ? 'Unmute' : 'Mute'}</Button>
                      ) : (
                         isOpenStage ? (
                             <Button onClick={selfPromoteToSpeaker} variant="outline"><Mic className="mr-2 h-5 w-5" /> Become a Speaker</Button>
@@ -690,22 +386,6 @@ export default function AudioRoomPage() {
                             <Button onClick={requestToSpeak} disabled={hasRequested} variant="outline"><Hand className="mr-2 h-5 w-5" />{hasRequested ? 'Request Sent' : 'Request to Speak'}</Button>
                         )
                      )}
-                     <AlertDialog open={isLeaveAlertOpen} onOpenChange={setIsLeaveAlertOpen}>
-                        <AlertDialogTrigger asChild><Button variant="outline" className="sm:w-auto w-full"><LogOut className="mr-2 h-5 w-5" />Leave</Button></AlertDialogTrigger>
-                        <AlertDialogContent>
-                            <AlertDialogHeader><AlertDialogTitle>Leave the room?</AlertDialogTitle><AlertDialogDescription>Are you sure you want to leave this room?</AlertDialogDescription></AlertDialogHeader>
-                            <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => leaveRoom()}>Leave</AlertDialogAction></AlertDialogFooter>
-                        </AlertDialogContent>
-                    </AlertDialog>
-                    {isModerator && (
-                         <AlertDialog open={isEndAlertOpen} onOpenChange={setIsEndAlertOpen}>
-                            <AlertDialogTrigger asChild><Button variant="destructive" className="sm:w-auto w-full"><XCircle className="mr-2 h-5 w-5" />End Room</Button></AlertDialogTrigger>
-                            <AlertDialogContent>
-                                <AlertDialogHeader><AlertDialogTitle>End the room?</AlertDialogTitle><AlertDialogDescription>This will permanently close the room for everyone. This action cannot be undone.</AlertDialogDescription></AlertDialogHeader>
-                                <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleEndRoom} className="bg-destructive hover:bg-destructive/90">End Room</AlertDialogAction></AlertDialogFooter>
-                            </AlertDialogContent>
-                        </AlertDialog>
-                    )}
                 </div>
             </div>
 

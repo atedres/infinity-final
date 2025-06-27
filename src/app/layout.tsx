@@ -31,11 +31,12 @@ export default function RootLayout({
             enableSystem
             disableTransitionOnChange
         >
-          <div className="relative flex min-h-screen flex-col bg-background">
-            {children}
-          </div>
-          <Toaster />
-          <ChatLauncher />
+          <ChatLauncher>
+            <div className="relative flex min-h-screen flex-col bg-background">
+              {children}
+            </div>
+            <Toaster />
+          </ChatLauncher>
         </ThemeProvider>
       </body>
     </html>
