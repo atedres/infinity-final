@@ -5,15 +5,11 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { HeaderActions } from '@/components/layout/header-actions';
 
-export function SubpageLayout({ title, children, backHref, showTitle = true, onBackClick }: { title: string; children: React.ReactNode; backHref?: string; showTitle?: boolean; onBackClick?: (e: React.MouseEvent<HTMLButtonElement>) => void; }) {
+export function SubpageLayout({ title, children, backHref, showTitle = true }: { title: string; children: React.ReactNode; backHref?: string; showTitle?: boolean; }) {
   const router = useRouter();
 
-  const handleBack = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (onBackClick) {
-      onBackClick(e);
-    } else {
-      router.push(backHref || '/');
-    }
+  const handleBack = () => {
+    router.push(backHref || '/');
   };
 
   return (

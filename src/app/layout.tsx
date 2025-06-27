@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
-import { ChatLauncher, FloatingRoomProvider } from '@/components/layout/chat-launcher';
+import { ChatLauncher } from '@/components/layout/chat-launcher';
 import { ThemeProvider } from '@/components/theme-provider';
 
 export const metadata: Metadata = {
@@ -31,13 +31,11 @@ export default function RootLayout({
             enableSystem
             disableTransitionOnChange
         >
-          <FloatingRoomProvider>
-            <div className="relative flex min-h-screen flex-col bg-background">
-              {children}
-            </div>
-            <Toaster />
-            <ChatLauncher />
-          </FloatingRoomProvider>
+          <div className="relative flex min-h-screen flex-col bg-background">
+            {children}
+          </div>
+          <Toaster />
+          <ChatLauncher />
         </ThemeProvider>
       </body>
     </html>
