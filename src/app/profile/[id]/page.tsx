@@ -118,8 +118,7 @@ interface ChatMessage {
 export default function ProfilePage() {
     const { toast } = useToast();
     const router = useRouter();
-    const params = useParams();
-    const userId = params.id as string;
+    const { id: userId } = useParams() as { id: string };
     const fileInputRef = useRef<HTMLInputElement>(null);
     const imgRef = useRef<HTMLImageElement>(null);
     const previewCanvasRef = useRef<HTMLCanvasElement>(null);

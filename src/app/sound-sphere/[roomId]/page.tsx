@@ -2,9 +2,9 @@
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { onAuthStateChanged, User, updateProfile } from 'firebase/auth';
-import { writeBatch, deleteField, serverTimestamp, doc, getDoc, updateDoc, collection, addDoc, deleteDoc } from 'firebase/firestore';
+import { writeBatch, deleteField, serverTimestamp, doc, getDoc, updateDoc, collection, addDoc, deleteDoc, setDoc } from 'firebase/firestore';
 import 'webrtc-adapter';
 
 import { SubpageLayout } from "@/components/layout/subpage-layout";
@@ -57,8 +57,7 @@ function toBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
 
 export default function AudioRoomPage() {
     const { toast } = useToast();
-    const params = useParams();
-    const roomId = params.roomId as string;
+    const { roomId } = useParams() as { roomId: string };
     const { 
         joinRoom, promptToLeave, roomData, participants, speakingRequests,
         isMuted, myRole, canSpeak, hasRequested, speakerInvitation, elapsedTime,
