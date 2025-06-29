@@ -24,7 +24,7 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, addDoc, getDocs, serverTimestamp, query, orderBy, where, doc, setDoc, deleteDoc, getDoc, updateDoc, increment, Timestamp, onSnapshot } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { formatDistanceToNow } from 'date-fns';
-import { ScrollArea } from '@/components/ui/scroll-area';
+
 
 // Types
 interface OriginalPost {
@@ -133,18 +133,18 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
 
             {isReplyingToThis && (
                 <div className="ml-11 mt-2">
-                    <form onSubmit={handleFormSubmit} className="flex w-full items-start gap-2">
+                     <div className="flex w-full items-start gap-2">
                         <Avatar className="h-8 w-8 mt-1">
                             <AvatarImage src={user?.photoURL || ''} />
                             <AvatarFallback>{user?.displayName?.charAt(0)}</AvatarFallback>
                         </Avatar>
-                        <div className="w-full">
+                        <form onSubmit={handleFormSubmit} className="w-full">
                             <Textarea placeholder={`Replying to ${comment.authorName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} className="flex-1" rows={1}/>
                             <div className="flex justify-end pt-2">
                                 <Button type="submit" size="sm" disabled={!replyContent.trim()}>Send</Button>
                             </div>
-                        </div>
-                    </form>
+                        </form>
+                    </div>
                 </div>
             )}
 
@@ -1076,8 +1076,8 @@ export default function SoundSphereClient() {
                                                                 <Send className="h-4 w-4" />
                                                             </Button>
                                                         </form>
-                                                        <ScrollArea className="mt-4 pr-4 max-h-96">
-                                                            <div className="space-y-4">
+                                                        <div className="mt-4 overflow-auto max-h-96">
+                                                            <div className="space-y-4 pr-4">
                                                                 {topLevelComments.map(comment => (
                                                                      <CommentThread
                                                                         key={comment.id}
@@ -1091,7 +1091,7 @@ export default function SoundSphereClient() {
                                                                     />
                                                                 ))}
                                                             </div>
-                                                        </ScrollArea>
+                                                        </div>
                                                     </div>
                                                 )}
                                             </div>
