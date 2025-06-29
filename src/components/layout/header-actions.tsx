@@ -136,23 +136,24 @@ export function HeaderActions() {
     }, [user, playNotificationSound]);
 
     const handleOpenNotifications = async (open: boolean) => {
-        if (open && hasUnread && db && user) {
+        // We now mark notifications as read when the dropdown is closed, not when opened.
+        if (!open && hasUnread && db && user) {
             const unreadNotifsQuery = query(
                 collection(db, "notifications"),
                 where("recipientId", "==", user.uid),
                 where("read", "==", false)
             );
+            
+            // It's a background task, so no need to block UI.
+            // Let the onSnapshot listener handle the UI update.
             const unreadSnapshot = await getDocs(unreadNotifsQuery);
-             if (unreadSnapshot.empty) {
-                setHasUnread(false);
-                return;
+            if (!unreadSnapshot.empty) {
+                const batch = writeBatch(db);
+                unreadSnapshot.docs.forEach(doc => {
+                    batch.update(doc.ref, { read: true });
+                });
+                await batch.commit();
             }
-            const batch = writeBatch(db);
-            unreadSnapshot.docs.forEach(doc => {
-                batch.update(doc.ref, { read: true });
-            });
-            await batch.commit();
-            setHasUnread(false);
         }
     };
 
