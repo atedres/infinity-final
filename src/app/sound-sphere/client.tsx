@@ -99,6 +99,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
         e.preventDefault();
         onReplySubmit(post, comment.id, replyContent);
         setReplyContent('');
+        onSetReplyingTo(null); // Close the form after submission
     };
 
     return (
@@ -125,14 +126,16 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
             </div>
 
             {isReplyingToThis && (
-                <form onSubmit={handleFormSubmit} className="flex w-full items-start gap-2 ml-11 mt-2">
-                    <Avatar className="h-8 w-8 mt-1">
-                        <AvatarImage src={user?.photoURL || ''} />
-                        <AvatarFallback>{user?.displayName?.charAt(0)}</AvatarFallback>
-                    </Avatar>
-                    <Textarea placeholder={`Replying to ${comment.authorName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} className="flex-1" rows={1}/>
-                    <Button type="submit" size="icon" className="h-9 w-9 mt-1" disabled={!replyContent.trim()}><Send className="h-4 w-4" /></Button>
-                </form>
+                <div className="ml-11 mt-2">
+                    <form onSubmit={handleFormSubmit} className="flex w-full items-start gap-2">
+                        <Avatar className="h-8 w-8 mt-1">
+                            <AvatarImage src={user?.photoURL || ''} />
+                            <AvatarFallback>{user?.displayName?.charAt(0)}</AvatarFallback>
+                        </Avatar>
+                        <Textarea placeholder={`Replying to ${comment.authorName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} className="flex-1" rows={1}/>
+                        <Button type="submit" size="icon" className="h-9 w-9 mt-1" disabled={!replyContent.trim()}><Send className="h-4 w-4" /></Button>
+                    </form>
+                </div>
             )}
 
             {replies.length > 0 && (
