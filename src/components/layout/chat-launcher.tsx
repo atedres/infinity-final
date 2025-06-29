@@ -242,7 +242,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
                     if (p.id !== currentUser.uid && !roomPeersRef.current[p.id] && roomLocalStreamRef.current) {
                         // The user with the greater ID initiates the connection.
                         if (currentUser.uid > p.id) {
-                            const peer = new Peer({ initiator: true, stream: roomLocalStreamRef.current, trickle: false });
+                            const peer = new Peer({ initiator: true, stream: roomLocalStreamRef.current, trickle: false, config: { iceServers } });
                             peer.on('signal', offer => sendSignal(p.id, roomId, offer, 'room-offer'));
                             peer.on('stream', stream => setRoomRemoteStreams(prev => [...prev.filter(s => s.peerId !== p.id), { peerId: p.id, stream }]));
                             peer.on('close', () => setRoomRemoteStreams(prev => prev.filter(s => s.peerId !== p.id)));
@@ -415,7 +415,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
     }, [p2pCallState]);
 
     useEffect(() => {
-        if (!currentUser || !db || !currentRoomId) return;
+        if (!currentUser || !db) return;
         const signalsQuery = query(collection(db, "signals"), where("to", "==", currentUser.uid));
         const unsubscribe = onSnapshot(signalsQuery, (snapshot) => {
             snapshot.docChanges().forEach(async (change) => {
@@ -432,7 +432,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
                          if (callStateRef.current !== 'idle') { toast({ title: 'Call Ended' }); endP2PCall(false); }
                     } else if (data.type === 'room-offer') {
                         if (!roomLocalStreamRef.current || !currentRoomId) return;
-                        const peer = new Peer({ initiator: false, stream: roomLocalStreamRef.current, trickle: false });
+                        const peer = new Peer({ initiator: false, stream: roomLocalStreamRef.current, trickle: false, config: { iceServers } });
                         peer.on('signal', answer => sendSignal(data.from, currentRoomId, answer, 'room-answer'));
                         peer.on('stream', stream => setRoomRemoteStreams(prev => [...prev.filter(s => s.peerId !== data.from), { peerId: data.from, stream }]));
                         peer.on('close', () => setRoomRemoteStreams(prev => prev.filter(s => s.peerId !== data.from)));
@@ -535,7 +535,32 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
 
     useEffect(() => { if (!isChatSheetOpen) setSelectedChat(null); }, [isChatSheetOpen]);
 
-    const P2PCallDialog = () => { /* ... JSX for P2P call dialog ... */ return <></> };
+    const P2PCallDialog = () => {
+        const otherParticipant = selectedChat?.otherParticipant;
+        const title = p2pCallState === 'calling' ? `Calling ${otherParticipant?.name}...` : `In call with ${otherParticipant?.name}`;
+        
+        return (
+            <Dialog open={p2pCallState === 'calling' || p2pCallState === 'active'} onOpenChange={(open) => !open && endP2PCall()}>
+                <DialogContent>
+                    <div className="flex flex-col items-center gap-6 p-8">
+                        <p className="text-lg font-medium">{title}</p>
+                        <Avatar className="h-24 w-24">
+                            <AvatarImage src={otherParticipant?.avatar} />
+                            <AvatarFallback>{otherParticipant?.name?.[0]}</AvatarFallback>
+                        </Avatar>
+                        <div className="flex items-center gap-4">
+                            <Button variant={isP2pMuted ? "secondary" : "default"} size="icon" className="h-14 w-14 rounded-full" onClick={toggleP2PMute}>
+                                {isP2pMuted ? <MicOff className="h-7 w-7"/> : <Mic className="h-7 w-7"/>}
+                            </Button>
+                            <Button variant="destructive" size="icon" className="h-14 w-14 rounded-full" onClick={() => endP2PCall()}>
+                                <PhoneOff className="h-7 w-7"/>
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+        );
+    };
 
     return (
         <AudioRoomContext.Provider value={{ roomData, participants, speakingRequests, chatMessages: roomChatMessages, speakerInvitation, isMuted: roomIsMuted, myRole, canSpeak, hasRequested, elapsedTime, joinRoom, leaveRoom, promptToLeave, endRoomForAll, toggleMute, requestToSpeak, manageRequest, changeRole, acceptInvite, declineInvite, removeUser, selfPromoteToSpeaker, pinLink, unpinLink, updateRoomTitle, sendChatMessage, handlePictureUpload }}>
@@ -543,9 +568,89 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
             {roomRemoteStreams.map(rs => <AudioPlayer key={rs.peerId} stream={rs.stream} />)}
             {p2pRemoteStream && <AudioPlayer stream={p2pRemoteStream} />}
             <P2PCallDialog />
-            <AlertDialog open={p2pCallState === 'receiving'}>{/* ... JSX ... */}</AlertDialog>
+            <AlertDialog open={p2pCallState === 'receiving'}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Incoming Call</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {incomingCall?.fromName} is calling you.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                     <div className="flex justify-center py-4">
+                        <Avatar className="h-24 w-24">
+                            <AvatarImage src={incomingCall?.fromAvatar} />
+                            <AvatarFallback>{incomingCall?.fromName?.[0]}</AvatarFallback>
+                        </Avatar>
+                    </div>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel onClick={declineP2PCall}>Decline</AlertDialogCancel>
+                        <AlertDialogAction onClick={answerP2PCall}>Accept</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
 
-            <Sheet open={isChatSheetOpen} onOpenChange={setIsChatSheetOpen}>{/* ... P2P Chat Sheet JSX ... */}</Sheet>
+            {currentUser && (
+            <Sheet open={isChatSheetOpen} onOpenChange={setIsChatSheetOpen}>
+                <SheetTrigger asChild>
+                    <Button variant="outline" size="icon" className="fixed bottom-6 left-6 z-40 h-16 w-16 rounded-full shadow-lg">
+                        <MessageSquare className="h-8 w-8"/>
+                        {totalUnread > 0 && (
+                             <span className="absolute -top-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
+                                {totalUnread}
+                            </span>
+                        )}
+                    </Button>
+                </SheetTrigger>
+                <SheetContent className="flex flex-col p-0" side="left">
+                    {selectedChat ? (
+                        <>
+                            <SheetHeader className="p-4 border-b flex-row items-center gap-4 space-y-0">
+                                <Button variant="ghost" size="icon" onClick={() => setSelectedChat(null)}><ArrowLeft/></Button>
+                                <Avatar><AvatarImage src={selectedChat.otherParticipant.avatar} /><AvatarFallback>{selectedChat.otherParticipant.name[0]}</AvatarFallback></Avatar>
+                                <SheetTitle className="flex-1">{selectedChat.otherParticipant.name}</SheetTitle>
+                                <Button variant="ghost" size="icon" onClick={() => startP2PCall(selectedChat)} disabled={p2pCallState !== 'idle'}><Phone/></Button>
+                            </SheetHeader>
+                            <ScrollArea className="flex-1 px-4">
+                                <div className="py-4 space-y-4">
+                                    {messages.map(message => (
+                                         <div key={message.id} className={cn("flex w-max max-w-xs flex-col gap-1 rounded-lg px-3 py-2 text-sm",
+                                            message.senderId === currentUser?.uid ? "ml-auto bg-primary text-primary-foreground" : "bg-muted"
+                                        )}>
+                                            {message.text}
+                                        </div>
+                                    ))}
+                                    <div ref={messagesEndRef} />
+                                </div>
+                            </ScrollArea>
+                            <SheetFooter className="p-4 border-t">
+                                <form onSubmit={handleSendMessage} className="flex w-full items-center space-x-2">
+                                    <Input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Type a message..." autoComplete="off"/>
+                                    <Button type="submit" size="icon" disabled={!newMessage.trim()}><Send/></Button>
+                                </form>
+                            </SheetFooter>
+                        </>
+                    ) : (
+                        <>
+                            <SheetHeader className="p-4 border-b">
+                                <SheetTitle>Messages</SheetTitle>
+                            </SheetHeader>
+                            <ScrollArea className="flex-1">
+                                {conversations.map(chat => (
+                                    <button key={chat.id} onClick={() => handleSelectChat(chat)} className="flex items-center gap-4 p-4 w-full text-left hover:bg-accent">
+                                        <Avatar><AvatarImage src={chat.otherParticipant.avatar}/><AvatarFallback>{chat.otherParticipant.name[0]}</AvatarFallback></Avatar>
+                                        <div className="flex-1 overflow-hidden">
+                                            <p className="font-semibold truncate">{chat.otherParticipant.name}</p>
+                                            <p className="text-sm text-muted-foreground truncate">{chat.lastMessage}</p>
+                                        </div>
+                                        {chat.unreadCount > 0 && <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">{chat.unreadCount}</span>}
+                                    </button>
+                                ))}
+                            </ScrollArea>
+                        </>
+                    )}
+                </SheetContent>
+            </Sheet>
+            )}
 
              {showFloatingPlayer && roomData && (
                 <Card className="fixed bottom-6 right-6 z-50 w-80 shadow-lg animate-in fade-in slide-in-from-bottom-10">
