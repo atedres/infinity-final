@@ -99,10 +99,10 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
     onUpdateComment: (postId: string, commentId: string, newText: string) => void;
 }) => {
     const [replyContent, setReplyContent] = useState('');
-    const [isExpanded, setIsExpanded] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [editedContent, setEditedContent] = useState(comment.text);
     const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
+    const [numRepliesToShow, setNumRepliesToShow] = useState(1);
 
     const replies = allComments.filter(c => c.parentId === comment.id);
     const isReplyingToThis = replyingTo === comment.id;
@@ -110,8 +110,16 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
     const isLiked = likedComments.has(comment.id);
     const isEditable = comment.createdAt && (new Date().getTime() - comment.createdAt.toDate().getTime()) < 15 * 60 * 1000;
     
-    const hasHiddenReplies = replies.length > 1;
-    const repliesToShow = hasHiddenReplies && !isExpanded ? replies.slice(0, 1) : replies;
+    const visibleReplies = replies.slice(0, numRepliesToShow);
+    const remainingRepliesCount = replies.length - visibleReplies.length;
+
+    const handleShowMore = () => {
+        setNumRepliesToShow(prev => prev + 5);
+    };
+
+    const handleShowLess = () => {
+        setNumRepliesToShow(1);
+    };
 
     const handleReplyFormSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -223,7 +231,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
 
             {replies.length > 0 && (
                  <div className={cn("mt-3 space-y-3", depth < 1 ? "pl-4 border-l-2 border-muted" : "")}>
-                    {repliesToShow.map(reply => (
+                    {visibleReplies.map(reply => (
                         <CommentThread 
                             key={reply.id} 
                             comment={reply}
@@ -240,13 +248,13 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                             onUpdateComment={onUpdateComment}
                         />
                     ))}
-                    {hasHiddenReplies && !isExpanded && (
-                        <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => setIsExpanded(true)}>
-                             <CornerDownRight className="h-3 w-3 mr-1" /> View {replies.length - 1} more replies
+                    {remainingRepliesCount > 0 && (
+                        <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={handleShowMore}>
+                             <CornerDownRight className="h-3 w-3 mr-1" /> View {remainingRepliesCount} more replies
                         </Button>
                     )}
-                    {isExpanded && hasHiddenReplies && (
-                        <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => setIsExpanded(false)}>
+                    {replies.length > 1 && numRepliesToShow > 1 && (
+                        <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={handleShowLess}>
                             <CornerUpLeft className="h-3 w-3 mr-1" /> View less
                         </Button>
                     )}
@@ -420,7 +428,7 @@ export default function SoundSphereClient() {
                 observer.unobserve(createPostCardRef.current);
             }
         };
-    }, []);
+    }, [toast]);
 
     const handleSearch = async (queryTerm: string) => {
         if (!db || queryTerm.length < 2 || !user) {

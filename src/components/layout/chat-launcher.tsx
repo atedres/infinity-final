@@ -631,7 +631,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
             {currentUser && (
             <Sheet open={isChatSheetOpen} onOpenChange={setIsChatSheetOpen}>
                 <SheetTrigger asChild>
-                    <Button variant="outline" size="icon" className="fixed bottom-24 right-6 z-40 h-16 w-16 rounded-full shadow-lg">
+                    <Button variant="outline" size="icon" className="fixed bottom-[5.5rem] right-6 z-40 h-16 w-16 rounded-full shadow-lg">
                         <MessageSquare className="h-8 w-8"/>
                         {totalUnread > 0 && (
                              <span className="absolute -top-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
