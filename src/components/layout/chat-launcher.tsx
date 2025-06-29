@@ -634,7 +634,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
             {currentUser && (
             <Sheet open={isChatSheetOpen} onOpenChange={setIsChatSheetOpen}>
                 <SheetTrigger asChild>
-                    <Button variant="outline" size="icon" className="fixed bottom-6 right-6 z-40 h-16 w-16 rounded-full shadow-lg">
+                    <Button variant="outline" size="icon" className="fixed bottom-24 right-6 z-40 h-16 w-16 rounded-full shadow-lg">
                         <MessageSquare className="h-8 w-8"/>
                         {totalUnread > 0 && (
                              <span className="absolute -top-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
@@ -695,7 +695,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
             )}
 
              {showFloatingPlayer && roomData && (
-                <Card className="fixed bottom-6 right-6 z-50 w-80 shadow-lg animate-in fade-in slide-in-from-bottom-10">
+                <Card className="fixed bottom-24 right-6 z-50 w-80 shadow-lg animate-in fade-in slide-in-from-bottom-10">
                     <CardContent className="p-3 flex items-center gap-2">
                         <div className="flex-1 overflow-hidden">
                             <p className="font-semibold truncate">{roomData.title}</p>
