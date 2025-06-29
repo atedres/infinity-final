@@ -82,9 +82,24 @@ interface ProfileUser {
 
 
 // Recursive component for rendering a comment and its replies
-const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyingTo, replyingTo, replyContent, setReplyContent, user, level = 0 }) => {
+const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyingTo, replyingTo, user }: {
+    comment: Comment;
+    post: Post;
+    allComments: Comment[];
+    onReplySubmit: (post: Post, parentCommentId: string, content: string) => void;
+    onSetReplyingTo: (commentId: string | null) => void;
+    replyingTo: string | null;
+    user: User | null;
+}) => {
+    const [replyContent, setReplyContent] = useState('');
     const replies = allComments.filter(c => c.parentId === comment.id);
     const isReplyingToThis = replyingTo === comment.id;
+
+    const handleFormSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onReplySubmit(post, comment.id, replyContent);
+        setReplyContent('');
+    };
 
     return (
         <div key={comment.id}>
@@ -104,19 +119,19 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                 </div>
             </div>
             <div className="ml-11 pl-1 pt-1">
-                <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => onSetReplyingTo(isReplyingToThis ? null : comment.id)}>
+                 <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => onSetReplyingTo(isReplyingToThis ? null : comment.id)}>
                     Reply
                 </Button>
             </div>
 
             {isReplyingToThis && (
-                <form onSubmit={(e) => { e.preventDefault(); onReplySubmit(post, comment.id); }} className="flex w-full items-start gap-2 ml-11 mt-2">
+                <form onSubmit={handleFormSubmit} className="flex w-full items-start gap-2 ml-11 mt-2">
                     <Avatar className="h-8 w-8 mt-1">
                         <AvatarImage src={user?.photoURL || ''} />
                         <AvatarFallback>{user?.displayName?.charAt(0)}</AvatarFallback>
                     </Avatar>
                     <Textarea placeholder={`Replying to ${comment.authorName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} className="flex-1" rows={1}/>
-                    <Button type="submit" size="icon" className="h-9 w-9 mt-1"><Send className="h-4 w-4" /></Button>
+                    <Button type="submit" size="icon" className="h-9 w-9 mt-1" disabled={!replyContent.trim()}><Send className="h-4 w-4" /></Button>
                 </form>
             )}
 
@@ -131,10 +146,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                             onReplySubmit={onReplySubmit}
                             onSetReplyingTo={onSetReplyingTo}
                             replyingTo={replyingTo}
-                            replyContent={replyContent}
-                            setReplyContent={setReplyContent}
                             user={user}
-                            level={level + 1}
                         />
                     ))}
                 </div>
@@ -163,7 +175,6 @@ export default function SoundSphereClient() {
     const [commentContent, setCommentContent] = useState('');
     const [postComments, setPostComments] = useState<Comment[]>([]);
     const [replyingTo, setReplyingTo] = useState<string | null>(null);
-    const [replyContent, setReplyContent] = useState('');
     
     // Dialog states
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -614,8 +625,8 @@ export default function SoundSphereClient() {
         }
     };
 
-    const handleReplySubmit = async (post: Post, parentCommentId: string) => {
-        if (!db || !user || !replyContent.trim()) {
+    const handleReplySubmit = async (post: Post, parentCommentId: string, content: string) => {
+        if (!db || !user || !content.trim()) {
             toast({ title: "Error", description: "Please write a reply.", variant: "destructive"});
             return;
         }
@@ -625,7 +636,7 @@ export default function SoundSphereClient() {
                 authorId: user.uid,
                 authorName: user.displayName || 'Anonymous',
                 authorAvatar: user.photoURL || '',
-                text: replyContent,
+                text: content,
                 parentId: parentCommentId,
                 createdAt: serverTimestamp(),
             });
@@ -646,7 +657,6 @@ export default function SoundSphereClient() {
                 });
             }
 
-            setReplyContent('');
             setReplyingTo(null);
             
             const commentsQuery = query(collection(db, "posts", post.id, "comments"), orderBy("createdAt", "asc"));
@@ -1059,8 +1069,6 @@ export default function SoundSphereClient() {
                                                                         onReplySubmit={handleReplySubmit}
                                                                         onSetReplyingTo={setReplyingTo}
                                                                         replyingTo={replyingTo}
-                                                                        replyContent={replyContent}
-                                                                        setReplyContent={setReplyContent}
                                                                         user={user}
                                                                     />
                                                                 ))}
