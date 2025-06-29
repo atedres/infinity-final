@@ -158,6 +158,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
         setRoomIsMuted(true);
         setHasRequested(false);
         setShowFloatingPlayer(false);
+        setIsLeaving(false);
 
         // Navigate if requested
         if (navigate) {
@@ -229,7 +230,8 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
     };
 
     const joinRoom = useCallback(async (roomId: string) => {
-        setIsLeaving(false);
+        if (isLeaving) return; // Prevent re-joining while in the process of leaving.
+
         if (currentRoomId === roomId || !currentUser || !db) return;
         if (currentRoomId) await leaveRoom({ navigate: false }); // Leave previous room if any
 
@@ -309,7 +311,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
             console.error("Failed to join room:", err);
             toast({ title: "Error", description: "Could not join room. Check microphone permissions.", variant: "destructive" });
         }
-    }, [currentUser, db, toast, router, currentRoomId, leaveRoom, cleanupAndResetLocalState]);
+    }, [currentUser, db, toast, router, currentRoomId, leaveRoom, cleanupAndResetLocalState, isLeaving]);
     
     useEffect(() => {
         if (!roomData?.createdAt) return;
