@@ -81,6 +81,69 @@ interface ProfileUser {
 }
 
 
+// Recursive component for rendering a comment and its replies
+const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyingTo, replyingTo, replyContent, setReplyContent, user, level = 0 }) => {
+    const replies = allComments.filter(c => c.parentId === comment.id);
+    const isReplyingToThis = replyingTo === comment.id;
+
+    return (
+        <div key={comment.id}>
+            <div className="flex items-start gap-3">
+                <Link href={`/profile/${comment.authorId}`}>
+                    <Avatar className="h-8 w-8">
+                        <AvatarImage src={comment.authorAvatar} />
+                        <AvatarFallback>{comment.authorName.charAt(0)}</AvatarFallback>
+                    </Avatar>
+                </Link>
+                <div className="bg-muted rounded-lg p-3 text-sm flex-1">
+                    <div className="flex items-center justify-between">
+                        <Link href={`/profile/${comment.authorId}`} className="font-semibold text-xs hover:underline">{comment.authorName}</Link>
+                        <span className="text-xs text-muted-foreground">{comment.createdAt ? formatDistanceToNow(comment.createdAt.toDate(), { addSuffix: true }) : ''}</span>
+                    </div>
+                    <p className="mt-1">{comment.text}</p>
+                </div>
+            </div>
+            <div className="ml-11 pl-1 pt-1">
+                <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => onSetReplyingTo(isReplyingToThis ? null : comment.id)}>
+                    Reply
+                </Button>
+            </div>
+
+            {isReplyingToThis && (
+                <form onSubmit={(e) => { e.preventDefault(); onReplySubmit(post, comment.id); }} className="flex w-full items-start gap-2 ml-11 mt-2">
+                    <Avatar className="h-8 w-8 mt-1">
+                        <AvatarImage src={user?.photoURL || ''} />
+                        <AvatarFallback>{user?.displayName?.charAt(0)}</AvatarFallback>
+                    </Avatar>
+                    <Textarea placeholder={`Replying to ${comment.authorName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} className="flex-1" rows={1}/>
+                    <Button type="submit" size="icon" className="h-9 w-9 mt-1"><Send className="h-4 w-4" /></Button>
+                </form>
+            )}
+
+            {replies.length > 0 && (
+                <div className="ml-6 mt-3 space-y-4 border-l-2 pl-5">
+                    {replies.map(reply => (
+                        <CommentThread 
+                            key={reply.id} 
+                            comment={reply}
+                            post={post}
+                            allComments={allComments}
+                            onReplySubmit={onReplySubmit}
+                            onSetReplyingTo={onSetReplyingTo}
+                            replyingTo={replyingTo}
+                            replyContent={replyContent}
+                            setReplyContent={setReplyContent}
+                            user={user}
+                            level={level + 1}
+                        />
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
+
+
 export default function SoundSphereClient() {
     const { toast } = useToast();
     const router = useRouter();
@@ -839,15 +902,6 @@ export default function SoundSphereClient() {
                                 const isPostOwner = user && user.uid === post.authorId;
                                 const isEditable = post.createdAt && (new Date().getTime() - post.createdAt.toDate().getTime()) < 15 * 60 * 1000;
                                 const topLevelComments = postComments.filter(comment => !comment.parentId);
-                                const repliesByParentId = postComments.reduce((acc, comment) => {
-                                    if (comment.parentId) {
-                                        if (!acc[comment.parentId]) {
-                                            acc[comment.parentId] = [];
-                                        }
-                                        acc[comment.parentId].push(comment);
-                                    }
-                                    return acc;
-                                }, {} as Record<string, Comment[]>);
                                 
                                 return (
                                 <Card key={post.id} id={`post-${post.id}`}>
@@ -997,61 +1051,18 @@ export default function SoundSphereClient() {
                                                         <ScrollArea className="mt-4 pr-4 max-h-96">
                                                             <div className="space-y-4">
                                                                 {topLevelComments.map(comment => (
-                                                                    <div key={comment.id}>
-                                                                        <div className="flex items-start gap-3">
-                                                                            <Link href={`/profile/${comment.authorId}`}>
-                                                                                <Avatar className="h-8 w-8">
-                                                                                    <AvatarImage src={comment.authorAvatar} />
-                                                                                    <AvatarFallback>{comment.authorName.charAt(0)}</AvatarFallback>
-                                                                                </Avatar>
-                                                                            </Link>
-                                                                            <div className="bg-muted rounded-lg p-3 text-sm flex-1">
-                                                                                <div className="flex items-center justify-between">
-                                                                                    <Link href={`/profile/${comment.authorId}`} className="font-semibold text-xs hover:underline">{comment.authorName}</Link>
-                                                                                    <span className="text-xs text-muted-foreground">{comment.createdAt ? formatDistanceToNow(comment.createdAt.toDate(), { addSuffix: true }) : ''}</span>
-                                                                                </div>
-                                                                                <p className="mt-1">{comment.text}</p>
-                                                                            </div>
-                                                                        </div>
-                                                                        <div className="ml-11 pl-1 pt-1">
-                                                                             <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => setReplyingTo(replyingTo === comment.id ? null : comment.id)}>
-                                                                                Reply
-                                                                            </Button>
-                                                                        </div>
-
-                                                                        {replyingTo === comment.id && (
-                                                                            <form onSubmit={(e) => { e.preventDefault(); handleReplySubmit(post, comment.id); }} className="flex w-full items-start gap-2 ml-11 mt-2">
-                                                                                <Avatar className="h-8 w-8 mt-1">
-                                                                                    <AvatarImage src={user?.photoURL || ''} />
-                                                                                    <AvatarFallback>{user?.displayName?.charAt(0)}</AvatarFallback>
-                                                                                </Avatar>
-                                                                                <Textarea placeholder={`Replying to ${comment.authorName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} className="flex-1" rows={1}/>
-                                                                                <Button type="submit" size="icon" className="h-9 w-9 mt-1"><Send className="h-4 w-4" /></Button>
-                                                                            </form>
-                                                                        )}
-
-                                                                        {repliesByParentId[comment.id] && (
-                                                                            <div className="ml-6 mt-3 space-y-4 border-l-2 pl-5">
-                                                                                {repliesByParentId[comment.id].map(reply => (
-                                                                                    <div key={reply.id} className="flex items-start gap-3">
-                                                                                        <Link href={`/profile/${reply.authorId}`}>
-                                                                                            <Avatar className="h-8 w-8">
-                                                                                                <AvatarImage src={reply.authorAvatar} />
-                                                                                                <AvatarFallback>{reply.authorName.charAt(0)}</AvatarFallback>
-                                                                                            </Avatar>
-                                                                                        </Link>
-                                                                                         <div className="bg-muted rounded-lg p-3 text-sm flex-1">
-                                                                                            <div className="flex items-center justify-between">
-                                                                                                <Link href={`/profile/${reply.authorId}`} className="font-semibold text-xs hover:underline">{reply.authorName}</Link>
-                                                                                                <span className="text-xs text-muted-foreground">{reply.createdAt ? formatDistanceToNow(reply.createdAt.toDate(), { addSuffix: true }) : ''}</span>
-                                                                                            </div>
-                                                                                            <p className="mt-1">{reply.text}</p>
-                                                                                        </div>
-                                                                                    </div>
-                                                                                ))}
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
+                                                                     <CommentThread
+                                                                        key={comment.id}
+                                                                        comment={comment}
+                                                                        post={post}
+                                                                        allComments={postComments}
+                                                                        onReplySubmit={handleReplySubmit}
+                                                                        onSetReplyingTo={setReplyingTo}
+                                                                        replyingTo={replyingTo}
+                                                                        replyContent={replyContent}
+                                                                        setReplyContent={setReplyContent}
+                                                                        user={user}
+                                                                    />
                                                                 ))}
                                                             </div>
                                                         </ScrollArea>
