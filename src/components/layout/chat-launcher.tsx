@@ -133,6 +133,36 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
     const [showFloatingPlayer, setShowFloatingPlayer] = useState(false);
     const roomUnsubscribes = useRef<(() => void)[]>([]);
 
+    const cleanupAndResetLocalState = useCallback((navigate = false) => {
+        // Stop all media tracks and destroy peer connections
+        Object.values(roomPeersRef.current).forEach(peer => peer.destroy());
+        roomPeersRef.current = {};
+        if (roomLocalStreamRef.current) {
+            roomLocalStreamRef.current.getTracks().forEach(track => track.stop());
+            roomLocalStreamRef.current = null;
+        }
+
+        // Unsubscribe from all Firestore listeners
+        roomUnsubscribes.current.forEach(unsub => unsub());
+        roomUnsubscribes.current = [];
+
+        // Reset all local React state related to the room
+        setRoomRemoteStreams([]);
+        setCurrentRoomId(null);
+        setRoomData(null);
+        setParticipants([]);
+        setSpeakingRequests([]);
+        setRoomChatMessages([]);
+        setRoomIsMuted(true);
+        setHasRequested(false);
+        setShowFloatingPlayer(false);
+
+        // Navigate if requested
+        if (navigate) {
+            router.push('/sound-sphere?tab=rooms');
+        }
+    }, [router]);
+
     // --- Combined Auth & Cleanup ---
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, user => {
@@ -141,11 +171,11 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
                 // Clear all state on logout
                 setConversations([]); setMessages([]); setSelectedChat(null); setIsChatSheetOpen(false); setTotalUnread(0); isInitialChatsLoad.current = true;
                 endP2PCall(false);
-                if (currentRoomId) leaveRoom({ navigate: false });
+                if (currentRoomId) cleanupAndResetLocalState(false);
             }
         });
         return () => unsubscribe();
-    }, [currentRoomId]); // Add currentRoomId to re-run if it changes
+    }, [currentRoomId, cleanupAndResetLocalState]); // Add dependencies
 
     // Hide floating player when on the room page
     useEffect(() => {
@@ -157,38 +187,30 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
 
     // --- Audio Room Logic ---
     const leaveRoom = useCallback(async (options: { navigate?: boolean } = {}) => {
-        if (!currentRoomId || !currentUser || !db) return;
-        
-        Object.values(roomPeersRef.current).forEach(peer => peer.destroy());
-        roomPeersRef.current = {};
-        roomLocalStreamRef.current?.getTracks().forEach(track => track.stop());
-        roomLocalStreamRef.current = null;
-        setRoomRemoteStreams([]);
-        
-        const participantRef = doc(db, "audioRooms", currentRoomId, "participants", currentUser.uid);
-        await deleteDoc(participantRef);
-
-        const remainingParticipantsSnap = await getDocs(collection(db, "audioRooms", currentRoomId, "participants"));
-        if (remainingParticipantsSnap.empty) {
-            await deleteDoc(doc(db, "audioRooms", currentRoomId));
+        if (!currentRoomId || !currentUser || !db) {
+            cleanupAndResetLocalState(options.navigate);
+            return;
         }
-
-        roomUnsubscribes.current.forEach(unsub => unsub());
-        roomUnsubscribes.current = [];
+        const roomId = currentRoomId; // Capture roomId before state is cleared
         
-        setCurrentRoomId(null);
-        setRoomData(null);
-        setParticipants([]);
-        setSpeakingRequests([]);
-        setRoomChatMessages([]);
-        setRoomIsMuted(true);
-        setHasRequested(false);
-        setShowFloatingPlayer(false);
+        // Clean up local state first to make UI responsive
+        cleanupAndResetLocalState(options.navigate);
 
-        if (options.navigate) {
-            router.push('/sound-sphere?tab=rooms');
+        try {
+            const roomDocRef = doc(db, "audioRooms", roomId);
+            const participantRef = doc(db, "audioRooms", roomId, "participants", currentUser.uid);
+
+            const remainingParticipantsSnap = await getDocs(collection(db, "audioRooms", roomId, "participants"));
+            
+            await deleteDoc(participantRef);
+            
+            if (remainingParticipantsSnap.docs.length <= 1) { // We were the last one
+                await deleteDoc(roomDocRef);
+            }
+        } catch (error) {
+            console.warn("Could not perform all firestore cleanup on leave. Room might have been deleted.", error);
         }
-    }, [currentRoomId, currentUser, db, router]);
+    }, [currentRoomId, currentUser, db, cleanupAndResetLocalState]);
     
     const sendSignal = async (to: string, chatId: string, signal: any, type: 'p2p-call' | 'room-offer' | 'room-answer') => {
         if (!db || !currentUser) return;
@@ -229,8 +251,10 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
                 if(docSnap.exists()) {
                     setRoomData({ id: docSnap.id, ...docSnap.data() } as Room)
                 } else {
-                    toast({ title: "Room Ended", description: "The host has ended the room." });
-                    leaveRoom({ navigate: true });
+                    if (roomUnsubscribes.current.length > 0) {
+                        toast({ title: "Room Ended", description: "The host has ended the room." });
+                        cleanupAndResetLocalState(true);
+                    }
                 }
             }));
             unsubs.push(onSnapshot(collection(db, "audioRooms", roomId, "participants"), (snapshot) => {
@@ -270,7 +294,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
             console.error("Failed to join room:", err);
             toast({ title: "Error", description: "Could not join room. Check microphone permissions.", variant: "destructive" });
         }
-    }, [currentUser, db, toast, router, currentRoomId, leaveRoom]);
+    }, [currentUser, db, toast, router, currentRoomId, leaveRoom, cleanupAndResetLocalState]);
     
     useEffect(() => {
         if (!roomData?.createdAt) return;
@@ -298,14 +322,14 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
         }
     
         try {
-            // Delete the room document. onSnapshot listeners on clients will handle their own cleanup.
             await deleteDoc(roomDocRef);
             toast({ title: "Room Ended", description: "The room has been closed for all participants." });
+            cleanupAndResetLocalState(true); // Manually trigger for the creator.
         } catch (error) {
             console.error("Error ending room for all:", error);
             toast({ title: "Error", description: "Could not end the room.", variant: "destructive" });
         }
-    }, [currentRoomId, currentUser, db, toast]);
+    }, [currentRoomId, currentUser, db, toast, cleanupAndResetLocalState]);
 
     const toggleMute = async () => {
         if (!roomLocalStreamRef.current || !currentUser || !currentRoomId) return;
@@ -676,3 +700,5 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
         </AudioRoomContext.Provider>
     );
 }
+
+    
