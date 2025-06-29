@@ -84,7 +84,7 @@ interface ProfileUser {
 
 
 // Recursive component for rendering a comment and its replies
-const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyingTo, replyingTo, user, depth = 0, likedComments, onLikeComment, onDeleteComment, onUpdateComment }: {
+const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyingTo, replyingTo, user, depth = 0, renderSubtree = true, likedComments, onLikeComment, onDeleteComment, onUpdateComment }: {
     comment: Comment;
     post: Post;
     allComments: Comment[];
@@ -93,6 +93,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
     replyingTo: string | null;
     user: User | null;
     depth?: number;
+    renderSubtree?: boolean;
     likedComments: Set<string>;
     onLikeComment: (postId: string, commentId: string) => void;
     onDeleteComment: (postId: string, commentId: string) => void;
@@ -102,6 +103,8 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
     const [isEditing, setIsEditing] = useState(false);
     const [editedContent, setEditedContent] = useState(comment.text);
     const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
+    
+    // State for top-level comment expansion
     const [isExpanded, setIsExpanded] = useState(false);
 
     const replies = allComments.filter(c => c.parentId === comment.id);
@@ -110,13 +113,22 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
     const isLiked = likedComments.has(comment.id);
     const isEditable = comment.createdAt && (new Date().getTime() - comment.createdAt.toDate().getTime()) < 15 * 60 * 1000;
     
-    const visibleReplies = isExpanded ? replies : replies.slice(0, 1);
-    
+    // --- New Logic ---
+    const getFullReplyCount = (startCommentId: string): number => {
+        const children = allComments.filter(c => c.parentId === startCommentId);
+        let count = children.length;
+        children.forEach(child => count += getFullReplyCount(child.id));
+        return count;
+    };
+
+    const totalReplyCount = depth === 0 ? getFullReplyCount(comment.id) : 0;
+    const showToggleButtons = totalReplyCount > 1;
+
     const handleReplyFormSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         onReplySubmit(post, comment.id, replyContent);
         setReplyContent('');
-        onSetReplyingTo(null); // Close the form after submission
+        onSetReplyingTo(null);
     };
     
     const handleSaveEdit = (e: React.FormEvent) => {
@@ -129,6 +141,69 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
         onDeleteComment(post.id, comment.id);
         setIsDeleteAlertOpen(false);
     };
+    
+    const renderReplies = () => {
+        if (!renderSubtree) return null;
+
+        if (depth === 0) { // I am a top-level comment, I control my own subtree
+            const repliesToRender = isExpanded ? replies : replies.slice(0, 1);
+            // In collapsed view, the first reply should NOT render its own children.
+            // In expanded view, all children should render their own children.
+            const passDownRenderSubtree = isExpanded; 
+            return (
+                <>
+                    {repliesToRender.map(reply => (
+                        <CommentThread 
+                            key={reply.id} 
+                            comment={reply}
+                            post={post}
+                            allComments={allComments}
+                            onReplySubmit={onReplySubmit}
+                            onSetReplyingTo={onSetReplyingTo}
+                            replyingTo={replyingTo}
+                            user={user}
+                            depth={depth + 1}
+                            renderSubtree={passDownRenderSubtree}
+                            likedComments={likedComments}
+                            onLikeComment={onLikeComment}
+                            onDeleteComment={onDeleteComment}
+                            onUpdateComment={onUpdateComment}
+                        />
+                    ))}
+                    {showToggleButtons && !isExpanded && (
+                        <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => setIsExpanded(true)}>
+                            <CornerDownRight className="h-3 w-3 mr-1" /> View {totalReplyCount - 1} more replies
+                        </Button>
+                    )}
+                    {showToggleButtons && isExpanded && (
+                        <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => setIsExpanded(false)}>
+                            <CornerUpLeft className="h-3 w-3 mr-1" /> View less
+                        </Button>
+                    )}
+                </>
+            )
+        } else { // I am a nested reply, my parent told me to render my subtree
+            return replies.map(reply => (
+                <CommentThread 
+                    key={reply.id} 
+                    comment={reply}
+                    post={post}
+                    allComments={allComments}
+                    onReplySubmit={onReplySubmit}
+                    onSetReplyingTo={onSetReplyingTo}
+                    replyingTo={replyingTo}
+                    user={user}
+                    depth={depth + 1}
+                    renderSubtree={true} // If I'm rendered, my children should be too
+                    likedComments={likedComments}
+                    onLikeComment={onLikeComment}
+                    onDeleteComment={onDeleteComment}
+                    onUpdateComment={onUpdateComment}
+                />
+            ));
+        }
+    }
+
 
     return (
         <div key={comment.id}>
@@ -219,38 +294,10 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                     </form>
                 </div>
             )}
-
-            {replies.length > 0 && (
-                 <div className={cn("mt-3 space-y-3", depth < 1 ? "pl-4 border-l-2 border-muted" : "")}>
-                    {visibleReplies.map(reply => (
-                        <CommentThread 
-                            key={reply.id} 
-                            comment={reply}
-                            post={post}
-                            allComments={allComments}
-                            onReplySubmit={onReplySubmit}
-                            onSetReplyingTo={onSetReplyingTo}
-                            replyingTo={replyingTo}
-                            user={user}
-                            depth={depth + 1}
-                            likedComments={likedComments}
-                            onLikeComment={onLikeComment}
-                            onDeleteComment={onDeleteComment}
-                            onUpdateComment={onUpdateComment}
-                        />
-                    ))}
-                     {replies.length > 1 && !isExpanded && (
-                        <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => setIsExpanded(true)}>
-                             <CornerDownRight className="h-3 w-3 mr-1" /> View {replies.length - 1} more replies
-                        </Button>
-                    )}
-                    {replies.length > 1 && isExpanded && (
-                        <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => setIsExpanded(false)}>
-                            <CornerUpLeft className="h-3 w-3 mr-1" /> View less
-                        </Button>
-                    )}
-                </div>
-            )}
+            
+            <div className={cn("mt-3 space-y-3", depth < 2 ? "pl-4 border-l-2" : "")}>
+                {renderReplies()}
+            </div>
         </div>
     );
 };
@@ -1495,7 +1542,6 @@ export default function SoundSphereClient() {
                 </DialogContent>
             </Dialog>
             
-            {/* Floating Action Button for creating a post */}
             {isCreatePostFabVisible && pathname === '/sound-sphere' && (
                  <Dialog open={isCreatePostDialogOpen} onOpenChange={setIsCreatePostDialogOpen}>
                     <DialogTrigger asChild>
@@ -1543,3 +1589,4 @@ export default function SoundSphereClient() {
         </>
     );
 }
+
