@@ -24,6 +24,7 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, addDoc, getDocs, serverTimestamp, query, orderBy, where, doc, setDoc, deleteDoc, getDoc, updateDoc, increment, Timestamp, onSnapshot } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { formatDistanceToNow } from 'date-fns';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 
 // Types
@@ -125,27 +126,29 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                     <p className="mt-1">{comment.text}</p>
                 </div>
             </div>
-            <div className="ml-11 pl-1 pt-1">
-                 <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => onSetReplyingTo(isReplyingToThis ? null : comment.id)}>
-                    Reply
-                </Button>
+            <div className="ml-11">
+                 <div className="pt-1">
+                    <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => onSetReplyingTo(isReplyingToThis ? null : comment.id)}>
+                        Reply
+                    </Button>
+                </div>
+
+                {isReplyingToThis && (
+                    <div className="mt-2">
+                        <div className="w-full">
+                            <form onSubmit={handleFormSubmit} className="flex items-start gap-2">
+                                <Textarea placeholder={`Replying to ${comment.authorName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} className="flex-1" rows={1}/>
+                                <div className="flex justify-end">
+                                    <Button type="submit" size="sm" disabled={!replyContent.trim()}>Send</Button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
             </div>
 
-            {isReplyingToThis && (
-                <div className="ml-11 mt-2">
-                    <div className="w-full">
-                        <form onSubmit={handleFormSubmit} className="flex items-start gap-2">
-                            <Textarea placeholder={`Replying to ${comment.authorName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} className="flex-1" rows={1}/>
-                            <div className="flex justify-end">
-                                <Button type="submit" size="sm" disabled={!replyContent.trim()}>Send</Button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
             {replies.length > 0 && (
-                <div className="mt-3 space-y-4 border-l-2 pl-5">
+                <div className="mt-3 space-y-4">
                     {repliesToShow.map(reply => (
                         <CommentThread 
                             key={reply.id} 
@@ -1072,7 +1075,7 @@ export default function SoundSphereClient() {
                                                                 <Send className="h-4 w-4" />
                                                             </Button>
                                                         </form>
-                                                        <div className="mt-4 overflow-auto">
+                                                        <div className="mt-4 overflow-x-auto">
                                                             <div className="space-y-4 pr-4">
                                                                 {topLevelComments.map(comment => (
                                                                      <CommentThread
