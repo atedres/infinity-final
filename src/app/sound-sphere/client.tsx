@@ -245,7 +245,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                              <CornerDownRight className="h-3 w-3 mr-1" /> View {replies.length - 1} more replies
                         </Button>
                     )}
-                    {isExpanded && (
+                    {isExpanded && hasHiddenReplies && (
                         <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => setIsExpanded(false)}>
                             <CornerUpLeft className="h-3 w-3 mr-1" /> View less
                         </Button>
@@ -943,10 +943,17 @@ export default function SoundSphereClient() {
 
             await batch.commit();
             toast({ title: "Comment Deleted" });
-            fetchPosts(user.uid);
             
+            // Update post comment count in local state
+            setPosts(prevPosts => prevPosts.map(p => 
+                p.id === postId ? { ...p, comments: p.comments - numToDelete } : p
+            ));
+
+            // Remove deleted comments from local comments state if section is open
             if (viewingCommentsFor === postId) {
-                toggleCommentsView(postId).then(() => toggleCommentsView(postId));
+                const deletedIds = new Set([commentId]);
+                repliesSnapshot.forEach(doc => deletedIds.add(doc.id));
+                setPostComments(prevComments => prevComments.filter(c => !deletedIds.has(c.id)));
             }
         } catch (error) {
             console.error("Error deleting comment:", error);
@@ -1493,7 +1500,7 @@ export default function SoundSphereClient() {
             {isCreatePostFabVisible && pathname === '/sound-sphere' && (
                  <Dialog open={isCreatePostDialogOpen} onOpenChange={setIsCreatePostDialogOpen}>
                     <DialogTrigger asChild>
-                        <Button className="fixed bottom-24 right-6 h-14 w-14 rounded-full shadow-lg z-40" size="icon">
+                        <Button className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg z-40" size="icon">
                             <PlusCircle className="h-7 w-7"/>
                         </Button>
                     </DialogTrigger>
