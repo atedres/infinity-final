@@ -102,7 +102,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
     const [isEditing, setIsEditing] = useState(false);
     const [editedContent, setEditedContent] = useState(comment.text);
     const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
-    const [numRepliesToShow, setNumRepliesToShow] = useState(1);
+    const [isExpanded, setIsExpanded] = useState(false);
 
     const replies = allComments.filter(c => c.parentId === comment.id);
     const isReplyingToThis = replyingTo === comment.id;
@@ -110,17 +110,8 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
     const isLiked = likedComments.has(comment.id);
     const isEditable = comment.createdAt && (new Date().getTime() - comment.createdAt.toDate().getTime()) < 15 * 60 * 1000;
     
-    const visibleReplies = replies.slice(0, numRepliesToShow);
-    const remainingRepliesCount = replies.length - visibleReplies.length;
-
-    const handleShowMore = () => {
-        setNumRepliesToShow(prev => prev + 5);
-    };
-
-    const handleShowLess = () => {
-        setNumRepliesToShow(1);
-    };
-
+    const visibleReplies = isExpanded ? replies : replies.slice(0, 1);
+    
     const handleReplyFormSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         onReplySubmit(post, comment.id, replyContent);
@@ -221,7 +212,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
             </div>
 
             {isReplyingToThis && (
-                <div className="w-full mt-2 pl-11">
+                 <div className="w-full mt-2 ml-11">
                     <form onSubmit={handleReplyFormSubmit} className="flex items-start gap-2">
                         <Textarea placeholder={`Replying to ${comment.authorName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} className="flex-1" rows={1}/>
                         <Button type="submit" size="sm" disabled={!replyContent.trim()}>Send</Button>
@@ -248,13 +239,13 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                             onUpdateComment={onUpdateComment}
                         />
                     ))}
-                    {remainingRepliesCount > 0 && (
-                        <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={handleShowMore}>
-                             <CornerDownRight className="h-3 w-3 mr-1" /> View {remainingRepliesCount} more replies
+                     {replies.length > 1 && !isExpanded && (
+                        <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => setIsExpanded(true)}>
+                             <CornerDownRight className="h-3 w-3 mr-1" /> View {replies.length - 1} more replies
                         </Button>
                     )}
-                    {replies.length > 1 && numRepliesToShow > 1 && (
-                        <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={handleShowLess}>
+                    {replies.length > 1 && isExpanded && (
+                        <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => setIsExpanded(false)}>
                             <CornerUpLeft className="h-3 w-3 mr-1" /> View less
                         </Button>
                     )}
@@ -1508,7 +1499,7 @@ export default function SoundSphereClient() {
             {isCreatePostFabVisible && pathname === '/sound-sphere' && (
                  <Dialog open={isCreatePostDialogOpen} onOpenChange={setIsCreatePostDialogOpen}>
                     <DialogTrigger asChild>
-                        <Button className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg z-40" size="icon">
+                         <Button className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg z-40" size="icon">
                             <PlusCircle className="h-7 w-7"/>
                         </Button>
                     </DialogTrigger>
