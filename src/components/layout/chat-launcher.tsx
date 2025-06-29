@@ -187,32 +187,31 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
 
     // --- Audio Room Logic ---
     const leaveRoom = useCallback(async (options: { navigate?: boolean } = {}) => {
-        if (!currentRoomId || !currentUser || !db) {
+        const roomId = currentRoomId; // Capture at the start
+        if (!roomId || !currentUser || !db) {
+            // If we don't have what we need, just clean up locally.
             cleanupAndResetLocalState(options.navigate);
             return;
         }
-        const roomId = currentRoomId; // Capture roomId before state is cleared
-        
-        // Clean up local state first to make UI responsive
-        cleanupAndResetLocalState(options.navigate);
 
         try {
             const roomDocRef = doc(db, "audioRooms", roomId);
             const participantRef = doc(db, "audioRooms", roomId, "participants", currentUser.uid);
 
-            // Atomically decrement count and delete participant
             const batch = writeBatch(db);
             batch.delete(participantRef);
             batch.update(roomDocRef, { participantsCount: increment(-1) });
             await batch.commit();
 
-            // After decrementing, check if room should be deleted
             const updatedRoomSnap = await getDoc(roomDocRef);
             if (updatedRoomSnap.exists() && updatedRoomSnap.data().participantsCount <= 0) {
                 await deleteDoc(roomDocRef);
             }
         } catch (error) {
             console.warn("Could not perform all firestore cleanup on leave. Room might have been deleted.", error);
+        } finally {
+            // Always clean up local state, regardless of server success. This is crucial.
+            cleanupAndResetLocalState(options.navigate);
         }
     }, [currentRoomId, currentUser, db, cleanupAndResetLocalState]);
     
