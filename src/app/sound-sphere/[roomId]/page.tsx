@@ -441,7 +441,7 @@ export default function AudioRoomPage() {
             <div className="mx-auto max-w-4xl space-y-8 pb-28">
                 <div className="text-left space-y-2">
                     <div className="flex items-center gap-2">
-                        <h1 className="min-w-0 break-words text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl font-headline">{roomData.title}</h1>
+                        <h1 className="min-w-0 break-words text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl font-headline line-clamp-2">{roomData.title}</h1>
                         {isModerator && (
                              <Dialog open={isTitleEditDialogOpen} onOpenChange={setIsTitleEditDialogOpen}>
                                 <DialogTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0"><Edit className="h-5 w-5" /></Button></DialogTrigger>

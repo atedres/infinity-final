@@ -1127,8 +1127,8 @@ export default function SoundSphereClient() {
                                                     <AvatarImage src={room.creatorAvatar} />
                                                     <AvatarFallback>{room.creatorName?.[0]}</AvatarFallback>
                                                 </Avatar>
-                                                <div className="flex-1 space-y-1">
-                                                    <h4 className="font-semibold text-lg leading-tight group-hover:text-primary transition-colors">{room.title}</h4>
+                                                <div className="flex-1 space-y-1 overflow-hidden">
+                                                    <h4 className="font-semibold text-lg leading-tight group-hover:text-primary transition-colors truncate">{room.title}</h4>
                                                     <p className="text-sm text-muted-foreground break-words line-clamp-2">{room.description || `A conversation started by ${room.creatorName}`}</p>
                                                 </div>
                                             </div>
