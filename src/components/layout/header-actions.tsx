@@ -31,6 +31,7 @@ import { auth, db, googleProvider } from "@/lib/firebase";
 import { formatDistanceToNow } from 'date-fns';
 import { ThemeToggle } from './theme-toggle';
 import { useNotificationSound } from '@/hooks/use-notification-sound';
+import { cn } from '@/lib/utils';
 
 
 interface Notification {
@@ -310,7 +311,14 @@ export function HeaderActions() {
                             <DropdownMenuSeparator />
                             {notifications.length > 0 ? (
                                 notifications.map(notification => (
-                                    <DropdownMenuItem key={notification.id} asChild className="cursor-pointer !block">
+                                    <DropdownMenuItem
+                                        key={notification.id}
+                                        asChild
+                                        className={cn(
+                                            'cursor-pointer !block',
+                                            !notification.read && 'bg-secondary'
+                                        )}
+                                    >
                                         <Link href={notification.href} className="flex flex-col items-start gap-1 w-full">
                                             <p className="text-sm leading-tight whitespace-normal">{notification.text}</p>
                                             <p className="text-xs text-muted-foreground">{notification.time}</p>
