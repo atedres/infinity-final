@@ -22,7 +22,7 @@ import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetDescri
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 import { db, auth, storage } from "@/lib/firebase";
-import { Mic, MicOff, Hand, Check, X, Headphones, UserX, Link as LinkIcon, MoreVertical, Edit, ShieldCheck, TimerIcon, MessageSquareText, Send, Crown, Camera, PhoneOff, LogOut, MessageSquare, User as UserIcon } from 'lucide-react';
+import { Mic, MicOff, Hand, Check, X, Headphones, UserX, Link as LinkIcon, MoreVertical, Edit, ShieldCheck, TimerIcon, MessageSquareText, Send, Crown, Camera, PhoneOff, LogOut, MessageSquare, User as UserIcon, UserPlus, UserCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ReactCrop, centerCrop, makeAspectCrop, type Crop, type PixelCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
@@ -76,6 +76,7 @@ export default function AudioRoomPage() {
     } = useAudioRoom();
 
     const [currentUser, setCurrentUser] = useState<User | null>(null);
+    const [followingIds, setFollowingIds] = useState<string[]>([]);
 
     // In-room profile editing refs
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -115,8 +116,24 @@ export default function AudioRoomPage() {
     const p2pMessagesEndRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
+        const fetchFollowing = async (userId: string) => {
+            if (!db) return;
+            const followingQuery = collection(db, "users", userId, "following");
+            try {
+                const snapshot = await getDocs(followingQuery);
+                setFollowingIds(snapshot.docs.map(doc => doc.id));
+            } catch (e) {
+                console.error("Failed to fetch following list", e)
+            }
+        };
+
         const authUnsubscribe = onAuthStateChanged(auth, (user) => {
             setCurrentUser(user);
+            if (user) {
+                fetchFollowing(user.uid);
+            } else {
+                setFollowingIds([]);
+            }
         });
         return () => authUnsubscribe();
     }, []);
@@ -247,6 +264,49 @@ export default function AudioRoomPage() {
 
         setNewP2PMessage('');
     };
+    
+    const handleFollowToggle = async (targetUser: Participant) => {
+        if (!db || !currentUser || !targetUser || currentUser.uid === targetUser.id) {
+            toast({ title: "Action not allowed", variant: "destructive" });
+            return;
+        }
+
+        const followingRef = doc(db, "users", currentUser.uid, "following", targetUser.id);
+        const followerRef = doc(db, "users", targetUser.id, "followers", currentUser.uid);
+
+        try {
+            const isCurrentlyFollowing = followingIds.includes(targetUser.id);
+            if (isCurrentlyFollowing) {
+                await deleteDoc(followingRef);
+                await deleteDoc(followerRef);
+                setFollowingIds(prev => prev.filter(id => id !== targetUser.id));
+                toast({ title: "Unfollowed", description: `You are no longer following ${targetUser.name}.` });
+            } else {
+                await setDoc(followingRef, { since: serverTimestamp() });
+                await setDoc(followerRef, { by: currentUser.displayName || 'Anonymous', at: serverTimestamp() });
+                
+                // Add notification
+                if (currentUser.uid !== targetUser.id) {
+                    await addDoc(collection(db, "notifications"), {
+                        recipientId: targetUser.id,
+                        actorId: currentUser.uid,
+                        actorName: currentUser.displayName || 'Someone',
+                        type: 'follow',
+                        entityId: currentUser.uid,
+                        read: false,
+                        createdAt: serverTimestamp(),
+                    });
+                }
+                
+                setFollowingIds(prev => [...prev, targetUser.id]);
+                toast({ title: "Followed", description: `You are now following ${targetUser.name}.` });
+            }
+        } catch (error) {
+            console.error("Error following/unfollowing user:", error);
+            toast({ title: "Error", description: "Something went wrong.", variant: "destructive" });
+        }
+    };
+
 
     const handleOpenOwnProfile = async () => {
         if (!db || !currentUser) return;
@@ -472,15 +532,22 @@ export default function AudioRoomPage() {
                                 )}
 
                                 {currentUser?.uid !== selectedUser.id && (
-                                    <div className="flex gap-2 w-full pt-4 border-t">
-                                        <Button asChild className="flex-1">
+                                    <div className="grid grid-cols-2 gap-2 w-full pt-4 border-t">
+                                        <Button asChild className="col-span-2">
                                             <Link href={`/profile/${selectedUser.id}`}>
                                                 <UserIcon className="mr-2 h-4 w-4" /> View Profile
                                             </Link>
                                         </Button>
+                                        <Button
+                                            variant={followingIds.includes(selectedUser.id) ? "secondary" : "default"}
+                                            onClick={() => handleFollowToggle(selectedUser)}
+                                        >
+                                            {followingIds.includes(selectedUser.id) ? <UserCheck className="mr-2 h-4 w-4" /> : <UserPlus className="mr-2 h-4 w-4" />}
+                                            {followingIds.includes(selectedUser.id) ? 'Following' : 'Follow'}
+                                        </Button>
                                         <Sheet open={isP2PChatOpen} onOpenChange={setIsP2PChatOpen}>
                                             <SheetTrigger asChild>
-                                                <Button variant="outline" className="flex-1">
+                                                <Button variant="outline">
                                                     <MessageSquare className="mr-2 h-4 w-4" /> Message
                                                 </Button>
                                             </SheetTrigger>
