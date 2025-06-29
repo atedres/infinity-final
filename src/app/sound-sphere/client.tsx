@@ -133,14 +133,10 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
 
             {isReplyingToThis && (
                 <div className="ml-11 mt-2">
-                     <div className="flex w-full items-start gap-2">
-                        <Avatar className="h-8 w-8 mt-1">
-                            <AvatarImage src={user?.photoURL || ''} />
-                            <AvatarFallback>{user?.displayName?.charAt(0)}</AvatarFallback>
-                        </Avatar>
-                        <form onSubmit={handleFormSubmit} className="w-full">
+                    <div className="w-full">
+                        <form onSubmit={handleFormSubmit} className="flex items-start gap-2">
                             <Textarea placeholder={`Replying to ${comment.authorName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} className="flex-1" rows={1}/>
-                            <div className="flex justify-end pt-2">
+                            <div className="flex justify-end">
                                 <Button type="submit" size="sm" disabled={!replyContent.trim()}>Send</Button>
                             </div>
                         </form>
@@ -149,7 +145,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
             )}
 
             {replies.length > 0 && (
-                <div className="ml-6 mt-3 space-y-4 border-l-2 pl-5">
+                <div className="mt-3 space-y-4 border-l-2 pl-5">
                     {repliesToShow.map(reply => (
                         <CommentThread 
                             key={reply.id} 
@@ -1076,7 +1072,7 @@ export default function SoundSphereClient() {
                                                                 <Send className="h-4 w-4" />
                                                             </Button>
                                                         </form>
-                                                        <div className="mt-4 overflow-auto max-h-96">
+                                                        <div className="mt-4 overflow-auto">
                                                             <div className="space-y-4 pr-4">
                                                                 {topLevelComments.map(comment => (
                                                                      <CommentThread
