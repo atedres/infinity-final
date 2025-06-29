@@ -109,9 +109,10 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
         onSetReplyingTo(null); // Close the form after submission
     };
 
-    // This logic ensures that indentation stops after the second level of replies.
-    // depth 0 = direct reply container, depth 1 = second level reply container, depth 2+ = third+ level reply container
-    const indentationClass = depth < 2 ? "pl-4" : "pl-0";
+    // This logic ensures that indentation stops after the first level of replies.
+    // depth 0 = direct replies to a comment.
+    // depth 1+ = deeper replies.
+    const indentationClass = depth < 1 ? "pl-4" : "pl-0";
 
 
     return (
