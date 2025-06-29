@@ -410,6 +410,7 @@ export default function AudioRoomPage() {
     };
     
     const canManageSelectedUser = isModerator && selectedUser && selectedUser.id !== currentUser.uid;
+    const isCreatorAndLast = myRole === 'creator' && participants.length === 1;
 
     return (
         <SubpageLayout onBackClick={promptToLeave} title={roomData.title} backHref="/sound-sphere?tab=rooms" showTitle={false}>
@@ -616,10 +617,17 @@ export default function AudioRoomPage() {
 
             <div className="fixed bottom-0 left-0 right-0 z-10 border-t bg-background/80 p-4 backdrop-blur-sm">
                 <div className="container mx-auto flex max-w-4xl items-center justify-between gap-2 sm:gap-4">
-                    <Button variant="destructive" onClick={promptToLeave} className="px-3 sm:px-4">
-                        <PhoneOff className="h-4 w-4 sm:mr-2" />
-                        <span className="hidden sm:inline">Leave</span>
-                    </Button>
+                    {isCreatorAndLast ? (
+                         <Button variant="destructive" onClick={endRoomForAll} className="px-3 sm:px-4">
+                            <LogOut className="h-4 w-4 sm:mr-2" />
+                            <span className="hidden sm:inline">End Room</span>
+                        </Button>
+                    ) : (
+                        <Button variant="destructive" onClick={promptToLeave} className="px-3 sm:px-4">
+                            <PhoneOff className="h-4 w-4 sm:mr-2" />
+                            <span className="hidden sm:inline">Leave</span>
+                        </Button>
+                    )}
             
                     <div className="flex items-center gap-2">
                         {canSpeak ? (

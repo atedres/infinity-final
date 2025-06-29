@@ -188,38 +188,35 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
 
     // --- Audio Room Logic ---
     const leaveRoom = useCallback(async (options: { navigate?: boolean } = {}) => {
-        if (isJoinLocked) return; // Prevent double-execution
-        setIsJoinLocked(true); // Lock joining immediately
+        if (isJoinLocked) return;
+        setIsJoinLocked(true);
 
         const roomId = currentRoomId;
         if (!roomId || !currentUser || !db) {
             cleanupAndResetLocalState(options.navigate);
-            setTimeout(() => setIsJoinLocked(false), 2000); // Unlock after a delay
+            setTimeout(() => setIsJoinLocked(false), 2000);
             return;
         }
-    
+
         try {
             const roomDocRef = doc(db, "audioRooms", roomId);
             const participantRef = doc(db, "audioRooms", roomId, "participants", currentUser.uid);
-    
-            const roomDocSnap = await getDoc(roomDocRef);
-            if (roomDocSnap.exists()) {
-                const batch = writeBatch(db);
-                batch.delete(participantRef);
-                batch.update(roomDocRef, { participantsCount: increment(-1) });
-                await batch.commit();
-    
-                // Re-fetch the document to check the new count accurately.
-                const updatedRoomSnap = await getDoc(roomDocRef);
-                if (updatedRoomSnap.exists() && updatedRoomSnap.data().participantsCount <= 0) {
-                    await deleteDoc(roomDocRef);
-                }
+
+            await deleteDoc(participantRef);
+
+            const participantsCollectionRef = collection(db, "audioRooms", roomId, "participants");
+            const remainingParticipantsSnap = await getDocs(participantsCollectionRef);
+
+            if (remainingParticipantsSnap.empty) {
+                await deleteDoc(roomDocRef);
+            } else {
+                await updateDoc(roomDocRef, { participantsCount: remainingParticipantsSnap.size });
             }
         } catch (error) {
             console.warn("Could not perform all firestore cleanup on leave. Room might have been deleted.", error);
         } finally {
             cleanupAndResetLocalState(options.navigate);
-            setTimeout(() => setIsJoinLocked(false), 2000); // Unlock after 2 seconds
+            setTimeout(() => setIsJoinLocked(false), 2000);
         }
     }, [currentRoomId, currentUser, db, cleanupAndResetLocalState, isJoinLocked]);
     
@@ -634,7 +631,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
             {currentUser && (
             <Sheet open={isChatSheetOpen} onOpenChange={setIsChatSheetOpen}>
                 <SheetTrigger asChild>
-                    <Button variant="outline" size="icon" className="fixed bottom-24 right-6 z-40 h-16 w-16 rounded-full shadow-lg">
+                    <Button variant="outline" size="icon" className="fixed bottom-28 right-6 z-40 h-16 w-16 rounded-full shadow-lg">
                         <MessageSquare className="h-8 w-8"/>
                         {totalUnread > 0 && (
                              <span className="absolute -top-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
@@ -695,7 +692,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
             )}
 
              {showFloatingPlayer && roomData && (
-                <Card className="fixed bottom-24 right-6 z-50 w-80 shadow-lg animate-in fade-in slide-in-from-bottom-10">
+                <Card className="fixed bottom-28 right-6 z-50 w-80 shadow-lg animate-in fade-in slide-in-from-bottom-10">
                     <CardContent className="p-3 flex items-center gap-2">
                         <div className="flex-1 overflow-hidden">
                             <p className="font-semibold truncate">{roomData.title}</p>
