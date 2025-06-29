@@ -4,8 +4,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { onAuthStateChanged, User, updateProfile } from 'firebase/auth';
-import { writeBatch, deleteField, serverTimestamp, doc, getDoc, updateDoc, collection, addDoc, deleteDoc, setDoc } from 'firebase/firestore';
+import { writeBatch, deleteField, serverTimestamp, doc, getDoc, updateDoc, collection, addDoc, deleteDoc, setDoc, query, where, orderBy, onSnapshot, getDocs } from 'firebase/firestore';
 import 'webrtc-adapter';
+import Link from 'next/link';
 
 import { SubpageLayout } from "@/components/layout/subpage-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -21,7 +22,7 @@ import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetDescri
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 import { db, auth, storage } from "@/lib/firebase";
-import { Mic, MicOff, Hand, Check, X, Headphones, UserX, Link as LinkIcon, MoreVertical, Edit, ShieldCheck, TimerIcon, MessageSquareText, Send, Crown, Camera, PhoneOff, LogOut } from 'lucide-react';
+import { Mic, MicOff, Hand, Check, X, Headphones, UserX, Link as LinkIcon, MoreVertical, Edit, ShieldCheck, TimerIcon, MessageSquareText, Send, Crown, Camera, PhoneOff, LogOut, MessageSquare, User as UserIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ReactCrop, centerCrop, makeAspectCrop, type Crop, type PixelCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
@@ -55,6 +56,14 @@ function toBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
 }
 
+// Interface for private messages within the room context
+interface P2PChatMessage {
+    id: string;
+    text: string;
+    senderId: string;
+    timestamp: any;
+}
+
 export default function AudioRoomPage() {
     const { toast } = useToast();
     const { roomId } = useParams() as { roomId: string };
@@ -75,6 +84,7 @@ export default function AudioRoomPage() {
 
     // Dialog & Sheet states
     const [selectedUser, setSelectedUser] = useState<Participant | null>(null);
+    const [selectedUserProfileStats, setSelectedUserProfileStats] = useState<{posts: number, followers: number, following: number} | null>(null);
     const [isOwnProfileSheetOpen, setIsOwnProfileSheetOpen] = useState(false);
     const [ownProfileData, setOwnProfileData] = useState<Participant | null>(null);
     const [ownProfileDetails, setOwnProfileDetails] = useState<{bio?: string, role: string, firstName: string, lastName: string, emailHandle: string} | null>(null);
@@ -91,10 +101,18 @@ export default function AudioRoomPage() {
     const [linkToPinText, setLinkToPinText] = useState('');
     const [isTitleEditDialogOpen, setIsTitleEditDialogOpen] = useState(false);
     const [newRoomTitleText, setNewRoomTitleText] = useState('');
-    const [isChatOpen, setIsChatOpen] = useState(false);
-    const [newChatMessage, setNewChatMessage] = useState('');
+    const [isRoomChatOpen, setIsRoomChatOpen] = useState(false);
+    const [newRoomChatMessage, setNewRoomChatMessage] = useState('');
     const [isEndRoomDialogOpen, setIsEndRoomDialogOpen] = useState(false);
-    const chatMessagesEndRef = useRef<HTMLDivElement>(null);
+    const roomChatMessagesEndRef = useRef<HTMLDivElement>(null);
+
+    // Private Chat State
+    const [isP2PChatOpen, setIsP2PChatOpen] = useState(false);
+    const [p2pMessages, setP2PMessages] = useState<P2PChatMessage[]>([]);
+    const [newP2PMessage, setNewP2PMessage] = useState('');
+    const [p2pChatId, setP2PChatId] = useState<string | null>(null);
+    const p2pChatUnsubscribe = useRef<() => void | null>(null);
+    const p2pMessagesEndRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
         const authUnsubscribe = onAuthStateChanged(auth, (user) => {
@@ -113,7 +131,79 @@ export default function AudioRoomPage() {
         if (roomData) setNewRoomTitleText(roomData.title);
     }, [roomData]);
 
-    useEffect(() => { chatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
+    useEffect(() => { roomChatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
+    useEffect(() => { p2pMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [p2pMessages]);
+
+    useEffect(() => {
+        if (!selectedUser || !db) {
+            setSelectedUserProfileStats(null);
+            return;
+        }
+
+        const fetchProfileStats = async () => {
+            try {
+                const followersQuery = collection(db, "users", selectedUser.id, "followers");
+                const followingQuery = collection(db, "users", selectedUser.id, "following");
+                const postsQuery = query(collection(db, "posts"), where("authorId", "==", selectedUser.id));
+
+                const [followersSnapshot, followingSnapshot, postsSnapshot] = await Promise.all([
+                    getDocs(followersQuery),
+                    getDocs(followingQuery),
+                    getDocs(postsQuery),
+                ]);
+
+                setSelectedUserProfileStats({
+                    followers: followersSnapshot.size,
+                    following: followingSnapshot.size,
+                    posts: postsSnapshot.size,
+                });
+            } catch (error) {
+                console.error("Error fetching user stats:", error);
+                setSelectedUserProfileStats(null);
+            }
+        };
+
+        fetchProfileStats();
+    }, [selectedUser]);
+
+    // Create P2P Chat ID
+    useEffect(() => {
+        if (currentUser && selectedUser && currentUser.uid !== selectedUser.id) {
+            const id = [currentUser.uid, selectedUser.id].sort().join('_');
+            setP2PChatId(id);
+        } else {
+            setP2PChatId(null);
+        }
+    }, [currentUser, selectedUser]);
+    
+    // Listener for P2P chat messages
+    useEffect(() => {
+        if (!isP2PChatOpen || !p2pChatId || !db) {
+            if (p2pChatUnsubscribe.current) {
+                p2pChatUnsubscribe.current();
+            }
+            return;
+        }
+
+        const messagesRef = collection(db, "chats", p2pChatId, "messages");
+        const q = query(messagesRef, orderBy("timestamp", "asc"));
+
+        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+            const fetchedMessages = querySnapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            })) as P2PChatMessage[];
+            setP2PMessages(fetchedMessages);
+        });
+        
+        p2pChatUnsubscribe.current = unsubscribe;
+
+        return () => {
+            if(p2pChatUnsubscribe.current) {
+                p2pChatUnsubscribe.current();
+            }
+        };
+    }, [isP2PChatOpen, p2pChatId]);
 
     const handlePinLinkSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -126,10 +216,36 @@ export default function AudioRoomPage() {
         updateRoomTitle(newRoomTitleText);
         setIsTitleEditDialogOpen(false);
     };
-    const handleSendChatMessageSubmit = (e: React.FormEvent) => {
+    const handleSendRoomChatMessageSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        sendChatMessage(newChatMessage);
-        setNewChatMessage('');
+        sendChatMessage(newRoomChatMessage);
+        setNewRoomChatMessage('');
+    };
+
+    const handleSendP2PMessage = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!db || !currentUser || !p2pChatId || !newP2PMessage.trim() || !selectedUser) return;
+
+        const messagesRef = collection(db, "chats", p2pChatId, "messages");
+        
+        await addDoc(messagesRef, {
+            text: newP2PMessage,
+            senderId: currentUser.uid,
+            timestamp: serverTimestamp(),
+        });
+        
+        const chatDocRef = doc(db, "chats", p2pChatId);
+        await setDoc(chatDocRef, {
+            participants: [currentUser.uid, selectedUser.id],
+            participantNames: {
+                [currentUser.uid]: currentUser.displayName,
+                [selectedUser.id]: selectedUser.name
+            },
+            lastMessage: newP2PMessage,
+            lastUpdate: serverTimestamp(),
+        }, { merge: true });
+
+        setNewP2PMessage('');
     };
 
     const handleOpenOwnProfile = async () => {
@@ -337,6 +453,64 @@ export default function AudioRoomPage() {
                                      <Avatar className="h-24 w-24 border-2 border-primary"><AvatarImage src={selectedUser.avatar} alt={selectedUser.name} /><AvatarFallback className="text-3xl">{selectedUser.name?.[0]}</AvatarFallback></Avatar>
                                     <DialogTitle className="text-2xl pt-2">{selectedUser.name}</DialogTitle>
                                 </DialogHeader>
+
+                                {selectedUserProfileStats && (
+                                    <div className="grid grid-cols-3 justify-around w-full pt-4 border-t divide-x">
+                                        <div className="text-center px-2">
+                                            <p className="font-bold text-xl">{selectedUserProfileStats.posts}</p>
+                                            <p className="text-sm text-muted-foreground">Posts</p>
+                                        </div>
+                                        <div className="text-center px-2">
+                                            <p className="font-bold text-xl">{selectedUserProfileStats.followers}</p>
+                                            <p className="text-sm text-muted-foreground">Followers</p>
+                                        </div>
+                                        <div className="text-center px-2">
+                                            <p className="font-bold text-xl">{selectedUserProfileStats.following}</p>
+                                            <p className="text-sm text-muted-foreground">Following</p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {currentUser?.uid !== selectedUser.id && (
+                                    <div className="flex gap-2 w-full pt-4 border-t">
+                                        <Button asChild className="flex-1">
+                                            <Link href={`/profile/${selectedUser.id}`}>
+                                                <UserIcon className="mr-2 h-4 w-4" /> View Profile
+                                            </Link>
+                                        </Button>
+                                        <Sheet open={isP2PChatOpen} onOpenChange={setIsP2PChatOpen}>
+                                            <SheetTrigger asChild>
+                                                <Button variant="outline" className="flex-1">
+                                                    <MessageSquare className="mr-2 h-4 w-4" /> Message
+                                                </Button>
+                                            </SheetTrigger>
+                                            <SheetContent className="flex flex-col">
+                                                <SheetHeader>
+                                                    <SheetTitle>Chat with {selectedUser.name}</SheetTitle>
+                                                </SheetHeader>
+                                                <div className="flex-1 flex flex-col overflow-y-auto">
+                                                    <ScrollArea className="flex-1 pr-4 -mr-4">
+                                                        <div className="space-y-4 py-4">
+                                                        {p2pMessages.map(message => (
+                                                            <div key={message.id} className={cn("flex w-max max-w-xs flex-col gap-1 rounded-lg px-3 py-2 text-sm",
+                                                                message.senderId === currentUser?.uid ? "ml-auto bg-primary text-primary-foreground" : "bg-muted"
+                                                            )}>
+                                                                {message.text}
+                                                            </div>
+                                                        ))}
+                                                        <div ref={p2pMessagesEndRef} />
+                                                        </div>
+                                                    </ScrollArea>
+                                                </div>
+                                                <form onSubmit={handleSendP2PMessage} className="mt-auto flex gap-2 pt-4 border-t">
+                                                    <Input value={newP2PMessage} onChange={(e) => setNewP2PMessage(e.target.value)} placeholder="Type a message..." autoComplete="off"/>
+                                                    <Button type="submit" disabled={!newP2PMessage.trim()}>Send</Button>
+                                                </form>
+                                            </SheetContent>
+                                        </Sheet>
+                                    </div>
+                                )}
+                                
                                 <div className="space-y-2 pt-4">
                                     {canManageSelectedUser && selectedUser.role !== 'creator' && <div className="border-t pt-4 space-y-2">
                                         <p className="text-sm font-medium text-center">Moderator Actions</p>
@@ -401,7 +575,7 @@ export default function AudioRoomPage() {
                     </div>
             
                     <div className="flex items-center gap-2">
-                        <Sheet open={isChatOpen} onOpenChange={setIsChatOpen}>
+                        <Sheet open={isRoomChatOpen} onOpenChange={setIsRoomChatOpen}>
                             <SheetTrigger asChild>
                                 <Button variant="outline" size="icon" className="h-10 w-10">
                                     <MessageSquareText className="h-5 w-5" />
@@ -418,11 +592,11 @@ export default function AudioRoomPage() {
                                                 <div><p className="text-sm font-semibold">{msg.senderName}</p><p className="text-sm bg-muted p-2 rounded-lg mt-1">{msg.text}</p></div>
                                             </div>
                                         ))}
-                                        <div ref={chatMessagesEndRef} />
+                                        <div ref={roomChatMessagesEndRef} />
                                     </div>
                                 </ScrollArea>
-                                <form onSubmit={handleSendChatMessageSubmit} className="flex items-center gap-2 pt-4 border-t">
-                                    <Textarea value={newChatMessage} onChange={(e) => setNewChatMessage(e.target.value)} placeholder="Send a message..." rows={1} className="min-h-0"/><Button type="submit" size="icon" disabled={!newChatMessage.trim()}><Send className="h-4 w-4"/></Button>
+                                <form onSubmit={handleSendRoomChatMessageSubmit} className="flex items-center gap-2 pt-4 border-t">
+                                    <Textarea value={newRoomChatMessage} onChange={(e) => setNewRoomChatMessage(e.target.value)} placeholder="Send a message..." rows={1} className="min-h-0"/><Button type="submit" size="icon" disabled={!newRoomChatMessage.trim()}><Send className="h-4 w-4"/></Button>
                                 </form>
                             </SheetContent>
                         </Sheet>
