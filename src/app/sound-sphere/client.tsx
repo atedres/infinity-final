@@ -10,7 +10,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Mic, Users, MessageCircle, Heart, Share2, PlusCircle, UserPlus, Send, Newspaper, Radio, MoreHorizontal, Edit, Trash2, Repeat, ImagePlus, X, Search, Loader2, CornerDownRight } from "lucide-react";
+import { Mic, Users, MessageCircle, Heart, Share2, PlusCircle, UserPlus, Send, Newspaper, Radio, MoreHorizontal, Edit, Trash2, Repeat, ImagePlus, X, Search, Loader2, CornerDownRight, CornerUpLeft } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
@@ -21,7 +21,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useToast } from '@/hooks/use-toast';
 import { db, auth, storage } from '@/lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, addDoc, getDocs, serverTimestamp, query, orderBy, where, doc, setDoc, deleteDoc, getDoc, updateDoc, increment, Timestamp, onSnapshot } from 'firebase/firestore';
+import { collection, addDoc, getDocs, serverTimestamp, query, orderBy, where, doc, setDoc, deleteDoc, getDoc, updateDoc, increment, Timestamp, onSnapshot, writeBatch } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -72,6 +72,7 @@ interface Comment {
     text: string;
     createdAt: Timestamp;
     parentId?: string;
+    likes: number;
 }
 
 interface ProfileUser {
@@ -83,7 +84,7 @@ interface ProfileUser {
 
 
 // Recursive component for rendering a comment and its replies
-const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyingTo, replyingTo, user, depth = 0 }: {
+const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyingTo, replyingTo, user, depth = 0, likedComments, onLikeComment, onDeleteComment, onUpdateComment }: {
     comment: Comment;
     post: Post;
     allComments: Comment[];
@@ -92,31 +93,60 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
     replyingTo: string | null;
     user: User | null;
     depth?: number;
+    likedComments: Set<string>;
+    onLikeComment: (postId: string, commentId: string) => void;
+    onDeleteComment: (postId: string, commentId: string) => void;
+    onUpdateComment: (postId: string, commentId: string, newText: string) => void;
 }) => {
     const [replyContent, setReplyContent] = useState('');
     const [isExpanded, setIsExpanded] = useState(false);
-    const replies = allComments.filter(c => c.parentId === comment.id);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editedContent, setEditedContent] = useState(comment.text);
+    const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
 
+    const replies = allComments.filter(c => c.parentId === comment.id);
+    const isReplyingToThis = replyingTo === comment.id;
+    const isAuthor = user?.uid === comment.authorId;
+    const isLiked = likedComments.has(comment.id);
+    const isEditable = comment.createdAt && (new Date().getTime() - comment.createdAt.toDate().getTime()) < 15 * 60 * 1000;
+    
     const hasHiddenReplies = replies.length > 1;
     const repliesToShow = hasHiddenReplies && !isExpanded ? replies.slice(0, 1) : replies;
 
-    const isReplyingToThis = replyingTo === comment.id;
-
-    const handleFormSubmit = (e: React.FormEvent) => {
+    const handleReplyFormSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         onReplySubmit(post, comment.id, replyContent);
         setReplyContent('');
         onSetReplyingTo(null); // Close the form after submission
     };
+    
+    const handleSaveEdit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onUpdateComment(post.id, comment.id, editedContent);
+        setIsEditing(false);
+    };
 
-    // This logic ensures that indentation stops after the first level of replies.
-    // depth 0 = direct replies to a comment.
-    // depth 1+ = deeper replies.
-    const indentationClass = depth < 1 ? "pl-4" : "pl-0";
-
+    const handleDelete = () => {
+        onDeleteComment(post.id, comment.id);
+        setIsDeleteAlertOpen(false);
+    };
 
     return (
         <div key={comment.id}>
+            <AlertDialog open={isDeleteAlertOpen} onOpenChange={setIsDeleteAlertOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Delete Comment?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This action cannot be undone. This will permanently delete this comment and all its replies.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleDelete} className="bg-destructive hover:bg-destructive/90">Delete</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
             <div className="flex items-start gap-3">
                 <Link href={`/profile/${comment.authorId}`}>
                     <Avatar className="h-8 w-8">
@@ -126,35 +156,75 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                 </Link>
                 <div className="bg-muted rounded-lg p-3 text-sm flex-1">
                     <div className="flex items-center justify-between">
-                        <Link href={`/profile/${comment.authorId}`} className="font-semibold text-xs hover:underline">{comment.authorName}</Link>
-                        <span className="text-xs text-muted-foreground">{comment.createdAt ? formatDistanceToNow(comment.createdAt.toDate(), { addSuffix: true }) : ''}</span>
+                        <div className="flex items-center gap-2">
+                            <Link href={`/profile/${comment.authorId}`} className="font-semibold text-xs hover:underline">{comment.authorName}</Link>
+                            <span className="text-xs text-muted-foreground">{comment.createdAt ? formatDistanceToNow(comment.createdAt.toDate(), { addSuffix: true }) : ''}</span>
+                        </div>
+                        {isAuthor && (
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-6 w-6">
+                                        <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent>
+                                    <TooltipProvider>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                 <div>
+                                                    <DropdownMenuItem disabled={!isEditable} onSelect={() => { setIsEditing(true); setEditedContent(comment.text); }}>
+                                                        <Edit className="mr-2 h-4 w-4" /> Edit
+                                                    </DropdownMenuItem>
+                                                 </div>
+                                            </TooltipTrigger>
+                                             {!isEditable && (
+                                                <TooltipContent side="left"><p>Can only edit within 15 mins.</p></TooltipContent>
+                                            )}
+                                        </Tooltip>
+                                    </TooltipProvider>
+                                    <DropdownMenuItem onSelect={() => setIsDeleteAlertOpen(true)} className="text-red-500 focus:text-red-500">
+                                        <Trash2 className="mr-2 h-4 w-4" /> Delete
+                                    </DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                        )}
                     </div>
-                    <p className="mt-1">{comment.text}</p>
+                     {isEditing ? (
+                        <form onSubmit={handleSaveEdit} className="mt-2 space-y-2">
+                            <Textarea value={editedContent} onChange={(e) => setEditedContent(e.target.value)} rows={2} />
+                            <div className="flex justify-end gap-2">
+                                <Button type="button" size="sm" variant="ghost" onClick={() => setIsEditing(false)}>Cancel</Button>
+                                <Button type="submit" size="sm" disabled={!editedContent.trim()}>Save</Button>
+                            </div>
+                        </form>
+                    ) : (
+                        <p className="mt-1 whitespace-pre-wrap">{comment.text}</p>
+                    )}
                 </div>
             </div>
-            <div className="ml-11">
-                 <div className="pt-1">
-                    <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => onSetReplyingTo(isReplyingToThis ? null : comment.id)}>
+            <div className="ml-11 flex items-center gap-2">
+                 <div className="pt-1 flex items-center gap-2">
+                    <Button variant="ghost" size="sm" className="text-xs h-auto p-0 flex items-center gap-1" onClick={() => onLikeComment(post.id, comment.id)} disabled={!user}>
+                        <Heart fill={isLiked ? 'currentColor' : 'none'} className={`h-3 w-3 ${isLiked ? 'text-red-500' : ''}`} /> 
+                        {comment.likes > 0 && <span>{comment.likes}</span>}
+                    </Button>
+                    <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => onSetReplyingTo(isReplyingToThis ? null : comment.id)} disabled={!user}>
                         Reply
                     </Button>
                 </div>
-
-                {isReplyingToThis && (
-                    <div className="mt-2">
-                        <div className="w-full">
-                           <form onSubmit={handleFormSubmit} className="flex items-start gap-2">
-                                <Textarea placeholder={`Replying to ${comment.authorName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} className="flex-1" rows={1}/>
-                                <div className="flex justify-end">
-                                    <Button type="submit" size="sm" disabled={!replyContent.trim()}>Send</Button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                )}
             </div>
 
+            {isReplyingToThis && (
+                <div className="w-full mt-2 pl-11">
+                    <form onSubmit={handleReplyFormSubmit} className="flex items-start gap-2">
+                        <Textarea placeholder={`Replying to ${comment.authorName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} className="flex-1" rows={1}/>
+                        <Button type="submit" size="sm" disabled={!replyContent.trim()}>Send</Button>
+                    </form>
+                </div>
+            )}
+
             {replies.length > 0 && (
-                 <div className={cn("mt-3 space-y-3 border-l-2 border-muted", indentationClass)}>
+                 <div className={cn("mt-3 space-y-3 border-l-2 border-muted", depth < 1 ? "pl-4" : "")}>
                     {repliesToShow.map(reply => (
                         <CommentThread 
                             key={reply.id} 
@@ -166,11 +236,20 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                             replyingTo={replyingTo}
                             user={user}
                             depth={depth + 1}
+                            likedComments={likedComments}
+                            onLikeComment={onLikeComment}
+                            onDeleteComment={onDeleteComment}
+                            onUpdateComment={onUpdateComment}
                         />
                     ))}
                     {hasHiddenReplies && !isExpanded && (
                         <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => setIsExpanded(true)}>
                              <CornerDownRight className="h-3 w-3 mr-1" /> View {replies.length - 1} more replies
+                        </Button>
+                    )}
+                    {isExpanded && (
+                        <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => setIsExpanded(false)}>
+                            <CornerUpLeft className="h-3 w-3 mr-1" /> View less
                         </Button>
                     )}
                 </div>
@@ -195,6 +274,7 @@ export default function SoundSphereClient() {
     const [imagePreviews, setImagePreviews] = useState<string[]>([]);
     const [followingIds, setFollowingIds] = useState<string[]>([]);
     const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
+    const [likedComments, setLikedComments] = useState<Set<string>>(new Set());
     const [viewingCommentsFor, setViewingCommentsFor] = useState<string | null>(null);
     const [commentContent, setCommentContent] = useState('');
     const [postComments, setPostComments] = useState<Comment[]>([]);
@@ -311,6 +391,8 @@ export default function SoundSphereClient() {
                 setPosts([]);
                 setRooms([]);
                 setFollowingIds([]);
+                setLikedPosts(new Set());
+                setLikedComments(new Set());
                 setIsCreatePostFabVisible(false);
             }
         });
@@ -598,6 +680,18 @@ export default function SoundSphereClient() {
             const querySnapshot = await getDocs(commentsQuery);
             const commentsList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Comment);
             setPostComments(commentsList);
+
+            if (user) {
+                const newLikedComments = new Set(likedComments);
+                for (const comment of commentsList) {
+                    const likeRef = doc(db, "posts", postId, "comments", comment.id, "likes", user.uid);
+                    const likeDoc = await getDoc(likeRef);
+                    if (likeDoc.exists()) {
+                        newLikedComments.add(comment.id);
+                    }
+                }
+                setLikedComments(newLikedComments);
+            }
         }
     };
 
@@ -614,6 +708,7 @@ export default function SoundSphereClient() {
                 authorName: user.displayName || 'Anonymous',
                 authorAvatar: user.photoURL || '',
                 text: commentContent,
+                likes: 0,
                 createdAt: serverTimestamp(),
             });
 
@@ -636,7 +731,6 @@ export default function SoundSphereClient() {
             setReplyingTo(null);
             fetchPosts(user.uid);
             
-            // Refetch comments for the post to show the new one
             const commentsQuery = query(collection(db, "posts", post.id, "comments"), orderBy("createdAt", "asc"));
             const snapshot = await getDocs(commentsQuery);
             setPostComments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Comment));
@@ -662,6 +756,7 @@ export default function SoundSphereClient() {
                 authorAvatar: user.photoURL || '',
                 text: content,
                 parentId: parentCommentId,
+                likes: 0,
                 createdAt: serverTimestamp(),
             });
 
@@ -770,6 +865,112 @@ export default function SoundSphereClient() {
             setIsRepostDialogOpen(false);
             setPostToRepost(null);
             setRepostComment('');
+        }
+    };
+
+    const handleLikeComment = async (postId: string, commentId: string) => {
+        if (!db || !user) {
+            toast({ title: "Login Required", description: "You must be logged in to like comments.", variant: "destructive" });
+            return;
+        }
+
+        const likeRef = doc(db, "posts", postId, "comments", commentId, "likes", user.uid);
+        const commentRef = doc(db, "posts", postId, "comments", commentId);
+        const newLikedComments = new Set(likedComments);
+
+        try {
+            const likeDoc = await getDoc(likeRef);
+
+            if (likeDoc.exists()) {
+                await deleteDoc(likeRef);
+                await updateDoc(commentRef, { likes: increment(-1) });
+                newLikedComments.delete(commentId);
+            } else {
+                await setDoc(likeRef, { userId: user.uid, createdAt: serverTimestamp() });
+                await updateDoc(commentRef, { likes: increment(1) });
+                newLikedComments.add(commentId);
+
+                const commentDoc = await getDoc(commentRef);
+                if (commentDoc.exists() && user.uid !== commentDoc.data().authorId) {
+                     await addDoc(collection(db, "notifications"), {
+                        recipientId: commentDoc.data().authorId,
+                        actorId: user.uid,
+                        actorName: user.displayName || 'Someone',
+                        type: 'like', // Could be a 'comment_like' type
+                        entityId: postId, // Link back to the post
+                        read: false,
+                        createdAt: serverTimestamp(),
+                    });
+                }
+            }
+            setLikedComments(newLikedComments);
+
+            // To update UI, refetch comments for the open post
+            if (viewingCommentsFor === postId) {
+                const commentsQuery = query(collection(db, "posts", postId, "comments"), orderBy("createdAt", "asc"));
+                const snapshot = await getDocs(commentsQuery);
+                setPostComments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Comment));
+            }
+        } catch (error) {
+            console.error("Error liking comment:", error);
+            toast({ title: "Error", description: "Could not update like.", variant: "destructive" });
+        }
+    };
+    
+    const handleDeleteComment = async (postId: string, commentId: string) => {
+        if (!db || !user) return;
+        const commentRef = doc(db, "posts", postId, "comments", commentId);
+        
+        try {
+            const commentDoc = await getDoc(commentRef);
+            if (!commentDoc.exists() || commentDoc.data().authorId !== user.uid) {
+                toast({ title: "Error", description: "You can only delete your own comments.", variant: "destructive" });
+                return;
+            }
+
+            const batch = writeBatch(db);
+            let numToDelete = 1;
+
+            const repliesQuery = query(collection(db, "posts", postId, "comments"), where("parentId", "==", commentId));
+            const repliesSnapshot = await getDocs(repliesQuery);
+            if (!repliesSnapshot.empty) {
+                numToDelete += repliesSnapshot.size;
+                repliesSnapshot.forEach(doc => batch.delete(doc.ref));
+            }
+
+            batch.delete(commentRef);
+
+            const postRef = doc(db, "posts", postId);
+            batch.update(postRef, { comments: increment(-numToDelete) });
+
+            await batch.commit();
+            toast({ title: "Comment Deleted" });
+            fetchPosts(user.uid);
+            
+            if (viewingCommentsFor === postId) {
+                toggleCommentsView(postId).then(() => toggleCommentsView(postId));
+            }
+        } catch (error) {
+            console.error("Error deleting comment:", error);
+            toast({ title: "Error", description: "Could not delete comment.", variant: "destructive" });
+        }
+    };
+
+    const handleUpdateComment = async (postId: string, commentId: string, newText: string) => {
+        if (!db || !user) return;
+        try {
+            const commentRef = doc(db, "posts", postId, "comments", commentId);
+            await updateDoc(commentRef, { text: newText });
+            toast({ title: "Comment Updated" });
+
+            if (viewingCommentsFor === postId) {
+                const commentsQuery = query(collection(db, "posts", postId, "comments"), orderBy("createdAt", "asc"));
+                const snapshot = await getDocs(commentsQuery);
+                setPostComments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Comment));
+            }
+        } catch (error) {
+            console.error("Error updating comment:", error);
+            toast({ title: "Error", description: "Could not update comment.", variant: "destructive" });
         }
     };
     
@@ -953,7 +1154,7 @@ export default function SoundSphereClient() {
                                                     <AvatarFallback>{post.authorName.charAt(0)}</AvatarFallback>
                                                 </Avatar>
                                             </Link>
-                                            <div className="w-full">
+                                            <div className="w-full overflow-hidden">
                                                 <div className="flex items-center justify-between">
                                                     <div>
                                                         <Link href={`/profile/${post.authorId}`} className="font-semibold hover:underline">{post.authorName}</Link>
@@ -1066,7 +1267,7 @@ export default function SoundSphereClient() {
                                                     </Button>
                                                 </div>
                                                 {viewingCommentsFor === post.id && (
-                                                    <div className="mt-4 pt-4 border-t">
+                                                    <div className="mt-4 pt-4 border-t overflow-x-auto">
                                                         <form onSubmit={(e) => { e.preventDefault(); handleCommentSubmit(post); }} className="flex w-full items-start gap-2">
                                                             <Avatar className="h-9 w-9 mt-1">
                                                                 <AvatarImage src={user?.photoURL || ''} />
@@ -1082,7 +1283,7 @@ export default function SoundSphereClient() {
                                                                 <Send className="h-4 w-4" />
                                                             </Button>
                                                         </form>
-                                                        <div className="mt-4 overflow-x-auto">
+                                                        <div className="mt-4">
                                                             <div className="space-y-4">
                                                                 {topLevelComments.map(comment => (
                                                                      <CommentThread
@@ -1094,6 +1295,10 @@ export default function SoundSphereClient() {
                                                                         onSetReplyingTo={setReplyingTo}
                                                                         replyingTo={replyingTo}
                                                                         user={user}
+                                                                        likedComments={likedComments}
+                                                                        onLikeComment={handleLikeComment}
+                                                                        onDeleteComment={handleDeleteComment}
+                                                                        onUpdateComment={handleUpdateComment}
                                                                     />
                                                                 ))}
                                                             </div>
