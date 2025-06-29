@@ -259,7 +259,7 @@ export default function ProfilePage() {
                 chatUnsubscribe.current();
             }
         };
-    }, [isChatOpen, chatId, db]);
+    }, [isChatOpen, chatId]);
 
     // Auto-scroll chat
     const scrollToBottom = () => {

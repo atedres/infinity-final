@@ -616,7 +616,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
             {currentUser && (
             <Sheet open={isChatSheetOpen} onOpenChange={setIsChatSheetOpen}>
                 <SheetTrigger asChild>
-                    <Button variant="outline" size="icon" className="fixed bottom-6 left-6 z-40 h-16 w-16 rounded-full shadow-lg">
+                    <Button variant="outline" size="icon" className="fixed bottom-6 right-6 z-40 h-16 w-16 rounded-full shadow-lg">
                         <MessageSquare className="h-8 w-8"/>
                         {totalUnread > 0 && (
                              <span className="absolute -top-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
@@ -625,7 +625,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
                         )}
                     </Button>
                 </SheetTrigger>
-                <SheetContent className="flex flex-col p-0" side="left">
+                <SheetContent className="flex flex-col p-0" side="right">
                     {selectedChat ? (
                         <>
                             <SheetHeader className="p-4 border-b flex-row items-center gap-4 space-y-0">
@@ -700,5 +700,3 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
         </AudioRoomContext.Provider>
     );
 }
-
-    
