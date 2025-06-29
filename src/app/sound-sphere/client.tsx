@@ -109,7 +109,10 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
         onSetReplyingTo(null); // Close the form after submission
     };
 
-    const indentationClass = depth === 0 ? "pl-4" : "pl-2";
+    // This logic ensures that indentation stops after the second level of replies.
+    // depth 0 = direct reply container, depth 1 = second level reply container, depth 2+ = third+ level reply container
+    const indentationClass = depth < 2 ? "pl-4" : "pl-0";
+
 
     return (
         <div key={comment.id}>
@@ -136,7 +139,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                 </div>
 
                 {isReplyingToThis && (
-                     <div className="mt-2">
+                    <div className="mt-2">
                         <div className="w-full">
                            <form onSubmit={handleFormSubmit} className="flex items-start gap-2">
                                 <Textarea placeholder={`Replying to ${comment.authorName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} className="flex-1" rows={1}/>
