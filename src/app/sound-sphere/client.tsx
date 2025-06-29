@@ -92,7 +92,13 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
     user: User | null;
 }) => {
     const [replyContent, setReplyContent] = useState('');
+    const [isExpanded, setIsExpanded] = useState(false);
     const replies = allComments.filter(c => c.parentId === comment.id);
+
+    // Collapse replies if there are more than one
+    const hasHiddenReplies = replies.length > 1;
+    const repliesToShow = hasHiddenReplies && !isExpanded ? replies.slice(0, 1) : replies;
+
     const isReplyingToThis = replyingTo === comment.id;
 
     const handleFormSubmit = (e: React.FormEvent) => {
@@ -132,15 +138,19 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                             <AvatarImage src={user?.photoURL || ''} />
                             <AvatarFallback>{user?.displayName?.charAt(0)}</AvatarFallback>
                         </Avatar>
-                        <Textarea placeholder={`Replying to ${comment.authorName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} className="flex-1" rows={1}/>
-                        <Button type="submit" size="icon" className="h-9 w-9 mt-1" disabled={!replyContent.trim()}><Send className="h-4 w-4" /></Button>
+                        <div className="w-full">
+                            <Textarea placeholder={`Replying to ${comment.authorName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} className="flex-1" rows={1}/>
+                            <div className="flex justify-end pt-2">
+                                <Button type="submit" size="sm" disabled={!replyContent.trim()}>Send</Button>
+                            </div>
+                        </div>
                     </form>
                 </div>
             )}
 
             {replies.length > 0 && (
                 <div className="ml-6 mt-3 space-y-4 border-l-2 pl-5">
-                    {replies.map(reply => (
+                    {repliesToShow.map(reply => (
                         <CommentThread 
                             key={reply.id} 
                             comment={reply}
@@ -152,6 +162,11 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                             user={user}
                         />
                     ))}
+                    {hasHiddenReplies && !isExpanded && (
+                        <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => setIsExpanded(true)}>
+                             <CornerDownRight className="h-3 w-3 mr-1" /> View {replies.length - 1} more replies
+                        </Button>
+                    )}
                 </div>
             )}
         </div>
