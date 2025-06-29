@@ -24,7 +24,7 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, addDoc, getDocs, serverTimestamp, query, orderBy, where, doc, setDoc, deleteDoc, getDoc, updateDoc, increment, Timestamp, onSnapshot } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { formatDistanceToNow } from 'date-fns';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { cn } from '@/lib/utils';
 
 
 // Types
@@ -83,7 +83,7 @@ interface ProfileUser {
 
 
 // Recursive component for rendering a comment and its replies
-const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyingTo, replyingTo, user }: {
+const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyingTo, replyingTo, user, depth = 0 }: {
     comment: Comment;
     post: Post;
     allComments: Comment[];
@@ -91,12 +91,12 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
     onSetReplyingTo: (commentId: string | null) => void;
     replyingTo: string | null;
     user: User | null;
+    depth?: number;
 }) => {
     const [replyContent, setReplyContent] = useState('');
     const [isExpanded, setIsExpanded] = useState(false);
     const replies = allComments.filter(c => c.parentId === comment.id);
 
-    // Collapse replies if there are more than one
     const hasHiddenReplies = replies.length > 1;
     const repliesToShow = hasHiddenReplies && !isExpanded ? replies.slice(0, 1) : replies;
 
@@ -108,6 +108,8 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
         setReplyContent('');
         onSetReplyingTo(null); // Close the form after submission
     };
+
+    const indentationClass = depth === 0 ? "pl-4" : "pl-2";
 
     return (
         <div key={comment.id}>
@@ -134,9 +136,9 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                 </div>
 
                 {isReplyingToThis && (
-                    <div className="mt-2">
+                     <div className="mt-2">
                         <div className="w-full">
-                            <form onSubmit={handleFormSubmit} className="flex items-start gap-2">
+                           <form onSubmit={handleFormSubmit} className="flex items-start gap-2">
                                 <Textarea placeholder={`Replying to ${comment.authorName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} className="flex-1" rows={1}/>
                                 <div className="flex justify-end">
                                     <Button type="submit" size="sm" disabled={!replyContent.trim()}>Send</Button>
@@ -148,7 +150,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
             </div>
 
             {replies.length > 0 && (
-                <div className="mt-3 space-y-4">
+                 <div className={cn("mt-3 space-y-3 border-l-2 border-muted", indentationClass)}>
                     {repliesToShow.map(reply => (
                         <CommentThread 
                             key={reply.id} 
@@ -159,6 +161,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                             onSetReplyingTo={onSetReplyingTo}
                             replyingTo={replyingTo}
                             user={user}
+                            depth={depth + 1}
                         />
                     ))}
                     {hasHiddenReplies && !isExpanded && (
@@ -1076,7 +1079,7 @@ export default function SoundSphereClient() {
                                                             </Button>
                                                         </form>
                                                         <div className="mt-4 overflow-x-auto">
-                                                            <div className="space-y-4 pr-4">
+                                                            <div className="space-y-4">
                                                                 {topLevelComments.map(comment => (
                                                                      <CommentThread
                                                                         key={comment.id}
