@@ -34,7 +34,7 @@ interface ChatMessage { id: string; text: string; senderId: string; timestamp: a
 interface IncomingCall { fromId: string; fromName: string; fromAvatar: string; chatId: string; signal: string; }
 
 // Room interfaces
-export interface Room { id: string; title: string; description: string; creatorId: string; pinnedLink?: string; roles?: { [key: string]: 'speaker' | 'moderator' }; createdAt: Timestamp; }
+export interface Room { id: string; title: string; description: string; creatorId: string; pinnedLink?: string; roles?: { [key: string]: 'speaker' | 'moderator' }; createdAt: Timestamp; participantsCount: number; }
 export interface Participant { id: string; name: string; avatar: string; isMuted: boolean; role: 'creator' | 'moderator' | 'speaker' | 'listener'; }
 export interface SpeakRequest { id: string; name: string; avatar: string; }
 export interface RoomChatMessage { id: string; text: string; senderId: string; senderName: string; senderAvatar: string; createdAt: Timestamp; }
@@ -200,11 +200,15 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
             const roomDocRef = doc(db, "audioRooms", roomId);
             const participantRef = doc(db, "audioRooms", roomId, "participants", currentUser.uid);
 
-            const remainingParticipantsSnap = await getDocs(collection(db, "audioRooms", roomId, "participants"));
-            
-            await deleteDoc(participantRef);
-            
-            if (remainingParticipantsSnap.docs.length <= 1) { // We were the last one
+            // Atomically decrement count and delete participant
+            const batch = writeBatch(db);
+            batch.delete(participantRef);
+            batch.update(roomDocRef, { participantsCount: increment(-1) });
+            await batch.commit();
+
+            // After decrementing, check if room should be deleted
+            const updatedRoomSnap = await getDoc(roomDocRef);
+            if (updatedRoomSnap.exists() && updatedRoomSnap.data().participantsCount <= 0) {
                 await deleteDoc(roomDocRef);
             }
         } catch (error) {
@@ -242,9 +246,14 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
             setRoomIsMuted(initialMute);
             if(roomLocalStreamRef.current) roomLocalStreamRef.current.getAudioTracks().forEach(t => t.enabled = !initialMute);
 
-            await setDoc(doc(db, "audioRooms", roomId, "participants", currentUser.uid), {
+            const batch = writeBatch(db);
+            const participantRef = doc(db, "audioRooms", roomId, "participants", currentUser.uid);
+            batch.set(participantRef, {
                 name: currentUser.displayName, avatar: currentUser.photoURL, isMuted: initialMute, role: myRole,
             }, { merge: true });
+            batch.update(roomDocRef, { participantsCount: increment(1) });
+            await batch.commit();
+
 
             const unsubs: (() => void)[] = [];
             unsubs.push(onSnapshot(roomDocRef, (docSnap) => {
