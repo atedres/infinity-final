@@ -37,8 +37,9 @@ import { cn } from '@/lib/utils';
 interface Notification {
   id: string;
   actorName: string;
-  type: 'follow' | 'like' | 'comment';
+  type: 'follow' | 'like' | 'comment' | 'reply';
   entityId: string;
+  secondaryEntityId?: string;
   read: boolean;
   createdAt: any;
   text: string;
@@ -104,7 +105,11 @@ export function HeaderActions() {
                         break;
                     case 'comment':
                         text = `${data.actorName} commented on your post.`;
-                        href = `/sound-sphere?tab=feed#post-${data.entityId}`;
+                        href = `/sound-sphere?tab=feed&viewComments=${data.entityId}#comment-${data.secondaryEntityId}`;
+                        break;
+                    case 'reply':
+                        text = `${data.actorName} replied to your comment.`;
+                        href = `/sound-sphere?tab=feed&viewComments=${data.entityId}#comment-${data.secondaryEntityId}`;
                         break;
                     case 'follow':
                         text = `${data.actorName} started following you.`;
@@ -307,30 +312,32 @@ export function HeaderActions() {
                                 <span className="sr-only">View notifications</span>
                             </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-80 max-h-80 overflow-y-auto">
+                        <DropdownMenuContent align="end" className="w-80">
                             <DropdownMenuLabel>Notifications</DropdownMenuLabel>
                             <DropdownMenuSeparator />
-                            {notifications.length > 0 ? (
-                                notifications.map(notification => (
-                                    <DropdownMenuItem
-                                        key={notification.id}
-                                        asChild
-                                        className={cn(
-                                            'cursor-pointer !block',
-                                            !notification.read && 'bg-secondary'
-                                        )}
-                                    >
-                                        <Link href={notification.href} className="flex flex-col items-start gap-1 w-full">
-                                            <p className="text-sm leading-tight whitespace-normal">{notification.text}</p>
-                                            <p className="text-xs text-muted-foreground">{notification.time}</p>
-                                        </Link>
+                             <div className="max-h-80 overflow-y-auto">
+                                {notifications.length > 0 ? (
+                                    notifications.map(notification => (
+                                        <DropdownMenuItem
+                                            key={notification.id}
+                                            asChild
+                                            className={cn(
+                                                'cursor-pointer !block',
+                                                !notification.read && 'bg-secondary'
+                                            )}
+                                        >
+                                            <Link href={notification.href} className="flex flex-col items-start gap-1 w-full">
+                                                <p className="text-sm leading-tight whitespace-normal">{notification.text}</p>
+                                                <p className="text-xs text-muted-foreground">{notification.time}</p>
+                                            </Link>
+                                        </DropdownMenuItem>
+                                    ))
+                                ) : (
+                                    <DropdownMenuItem disabled>
+                                        <p className="text-sm text-center w-full p-4">No new notifications</p>
                                     </DropdownMenuItem>
-                                ))
-                            ) : (
-                                <DropdownMenuItem disabled>
-                                    <p className="text-sm text-center w-full p-4">No new notifications</p>
-                                </DropdownMenuItem>
-                            )}
+                                )}
+                            </div>
                         </DropdownMenuContent>
                     </DropdownMenu>
 

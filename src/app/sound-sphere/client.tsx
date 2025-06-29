@@ -206,7 +206,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
 
 
     return (
-        <div key={comment.id}>
+        <div key={comment.id} id={`comment-${comment.id}`}>
             <AlertDialog open={isDeleteAlertOpen} onOpenChange={setIsDeleteAlertOpen}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
@@ -295,7 +295,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                 </div>
             )}
             
-            <div className={cn("mt-3 space-y-3", depth < 2 ? "pl-4 border-l-2" : "")}>
+            <div className={cn("mt-3 space-y-3", depth < 1 ? "pl-4 border-l-2" : "")}>
                 {renderReplies()}
             </div>
         </div>
@@ -310,6 +310,7 @@ export default function SoundSphereClient() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const searchParams = useSearchParams();
     const defaultTab = searchParams.get('tab') || 'feed';
+    const hasAutoOpenedComments = useRef(false);
 
     // Feed State
     const [posts, setPosts] = useState<Post[]>([]);
@@ -390,6 +391,42 @@ export default function SoundSphereClient() {
         setFollowingIds(ids);
     };
 
+    const toggleCommentsView = useCallback(async (postId: string) => {
+        if (!db) return;
+        if (viewingCommentsFor === postId) {
+            setViewingCommentsFor(null);
+            setPostComments([]);
+        } else {
+            setViewingCommentsFor(postId);
+            setReplyingTo(null);
+            const commentsQuery = query(collection(db, "posts", postId, "comments"), orderBy("createdAt", "asc"));
+            const querySnapshot = await getDocs(commentsQuery);
+            const commentsList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Comment);
+            setPostComments(commentsList);
+
+            if (user) {
+                const newLikedComments = new Set(likedComments);
+                for (const comment of commentsList) {
+                    const likeRef = doc(db, "posts", postId, "comments", comment.id, "likes", user.uid);
+                    const likeDoc = await getDoc(likeRef);
+                    if (likeDoc.exists()) {
+                        newLikedComments.add(comment.id);
+                    }
+                }
+                setLikedComments(newLikedComments);
+            }
+        }
+    }, [viewingCommentsFor, user, likedComments]);
+
+
+    useEffect(() => {
+        const postToView = searchParams.get('viewComments');
+        if (postToView && posts.length > 0 && !hasAutoOpenedComments.current) {
+            toggleCommentsView(postToView);
+            hasAutoOpenedComments.current = true;
+        }
+    }, [searchParams, posts, toggleCommentsView]);
+    
     useEffect(() => {
         const hash = window.location.hash;
         if (hash) {
@@ -405,7 +442,9 @@ export default function SoundSphereClient() {
                 }, 500);
             }
         }
+    }, [postComments]);
 
+    useEffect(() => {
         if (!auth || !db) return;
 
         let roomsUnsubscribe: (() => void) | null = null;
@@ -712,33 +751,6 @@ export default function SoundSphereClient() {
         }
     };
 
-    const toggleCommentsView = async (postId: string) => {
-        if (!db) return;
-        if (viewingCommentsFor === postId) {
-            setViewingCommentsFor(null);
-            setPostComments([]);
-        } else {
-            setViewingCommentsFor(postId);
-            setReplyingTo(null);
-            const commentsQuery = query(collection(db, "posts", postId, "comments"), orderBy("createdAt", "asc"));
-            const querySnapshot = await getDocs(commentsQuery);
-            const commentsList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Comment);
-            setPostComments(commentsList);
-
-            if (user) {
-                const newLikedComments = new Set(likedComments);
-                for (const comment of commentsList) {
-                    const likeRef = doc(db, "posts", postId, "comments", comment.id, "likes", user.uid);
-                    const likeDoc = await getDoc(likeRef);
-                    if (likeDoc.exists()) {
-                        newLikedComments.add(comment.id);
-                    }
-                }
-                setLikedComments(newLikedComments);
-            }
-        }
-    };
-
     const handleCommentSubmit = async (post: Post) => {
         if (!db || !user || !commentContent.trim()) {
             toast({ title: "Error", description: "Please write a comment to post.", variant: "destructive"});
@@ -747,7 +759,7 @@ export default function SoundSphereClient() {
 
         try {
             const commentsColRef = collection(db, "posts", post.id, "comments");
-            await addDoc(commentsColRef, {
+            const newCommentRef = await addDoc(commentsColRef, {
                 authorId: user.uid,
                 authorName: user.displayName || 'Anonymous',
                 authorAvatar: user.photoURL || '',
@@ -766,6 +778,7 @@ export default function SoundSphereClient() {
                     actorName: user.displayName || 'Someone',
                     type: 'comment',
                     entityId: post.id,
+                    secondaryEntityId: newCommentRef.id,
                     read: false,
                     createdAt: serverTimestamp(),
                 });
@@ -794,7 +807,7 @@ export default function SoundSphereClient() {
         }
         try {
             const commentsColRef = collection(db, "posts", post.id, "comments");
-            await addDoc(commentsColRef, {
+            const newReplyRef = await addDoc(commentsColRef, {
                 authorId: user.uid,
                 authorName: user.displayName || 'Anonymous',
                 authorAvatar: user.photoURL || '',
@@ -813,8 +826,9 @@ export default function SoundSphereClient() {
                     recipientId: parentComment.authorId,
                     actorId: user.uid,
                     actorName: user.displayName || 'Someone',
-                    type: 'comment',
+                    type: 'reply',
                     entityId: post.id,
+                    secondaryEntityId: newReplyRef.id,
                     read: false,
                     createdAt: serverTimestamp(),
                 });
@@ -844,7 +858,7 @@ export default function SoundSphereClient() {
         try {
             await deleteDoc(doc(db, "posts", postToDelete.id));
             toast({ title: "Post Deleted", description: "Your post has been successfully removed." });
-            fetchPosts(user.uid);
+            setPosts(prev => prev.filter(p => p.id !== postToDelete.id));
         } catch (error) {
             console.error("Error deleting post:", error);
             toast({ title: "Error", description: "Failed to delete post.", variant: "destructive" });
@@ -1318,7 +1332,7 @@ export default function SoundSphereClient() {
                                                     </Button>
                                                 </div>
                                                 {viewingCommentsFor === post.id && (
-                                                    <div className="mt-4 pt-4 border-t overflow-x-auto">
+                                                    <div className="mt-4 pt-4 border-t">
                                                         <form onSubmit={(e) => { e.preventDefault(); handleCommentSubmit(post); }} className="flex w-full items-start gap-2">
                                                             <Avatar className="h-9 w-9 mt-1">
                                                                 <AvatarImage src={user?.photoURL || ''} />
