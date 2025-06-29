@@ -61,7 +61,6 @@ interface AudioRoomContextType {
   canSpeak: boolean;
   hasRequested: boolean;
   elapsedTime: string;
-  isLeaving: boolean;
   joinRoom: (roomId: string) => void;
   leaveRoom: (options?: { navigate?: boolean }) => Promise<void>;
   promptToLeave: () => void;
@@ -133,7 +132,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
     const [roomRemoteStreams, setRoomRemoteStreams] = useState<RemoteStream[]>([]);
     const [showFloatingPlayer, setShowFloatingPlayer] = useState(false);
     const roomUnsubscribes = useRef<(() => void)[]>([]);
-    const [isLeaving, setIsLeaving] = useState(false);
+    const [isJoinLocked, setIsJoinLocked] = useState(false);
 
     const cleanupAndResetLocalState = useCallback((navigate = false) => {
         // Stop all media tracks and destroy peer connections
@@ -158,7 +157,6 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
         setRoomIsMuted(true);
         setHasRequested(false);
         setShowFloatingPlayer(false);
-        setIsLeaving(false);
 
         // Navigate if requested
         if (navigate) {
@@ -190,10 +188,13 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
 
     // --- Audio Room Logic ---
     const leaveRoom = useCallback(async (options: { navigate?: boolean } = {}) => {
-        setIsLeaving(true);
-        const roomId = currentRoomId; // Capture at the start
+        if (isJoinLocked) return; // Prevent double-execution
+        setIsJoinLocked(true); // Lock joining immediately
+
+        const roomId = currentRoomId;
         if (!roomId || !currentUser || !db) {
             cleanupAndResetLocalState(options.navigate);
+            setTimeout(() => setIsJoinLocked(false), 2000); // Unlock after a delay
             return;
         }
     
@@ -217,10 +218,10 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
         } catch (error) {
             console.warn("Could not perform all firestore cleanup on leave. Room might have been deleted.", error);
         } finally {
-            // Always clean up local state, regardless of server success. This is crucial.
             cleanupAndResetLocalState(options.navigate);
+            setTimeout(() => setIsJoinLocked(false), 2000); // Unlock after 2 seconds
         }
-    }, [currentRoomId, currentUser, db, cleanupAndResetLocalState]);
+    }, [currentRoomId, currentUser, db, cleanupAndResetLocalState, isJoinLocked]);
     
     const sendSignal = async (to: string, chatId: string, signal: any, type: 'p2p-call' | 'room-offer' | 'room-answer') => {
         if (!db || !currentUser) return;
@@ -230,7 +231,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
     };
 
     const joinRoom = useCallback(async (roomId: string) => {
-        if (isLeaving) return; // Prevent re-joining while in the process of leaving.
+        if (isJoinLocked) return; // Check if joining is locked
 
         if (currentRoomId === roomId || !currentUser || !db) return;
         if (currentRoomId) await leaveRoom({ navigate: false }); // Leave previous room if any
@@ -311,7 +312,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
             console.error("Failed to join room:", err);
             toast({ title: "Error", description: "Could not join room. Check microphone permissions.", variant: "destructive" });
         }
-    }, [currentUser, db, toast, router, currentRoomId, leaveRoom, cleanupAndResetLocalState, isLeaving]);
+    }, [currentUser, db, toast, router, currentRoomId, leaveRoom, cleanupAndResetLocalState, isJoinLocked]);
     
     useEffect(() => {
         if (!roomData?.createdAt) return;
@@ -604,7 +605,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
     };
 
     return (
-        <AudioRoomContext.Provider value={{ roomData, participants, speakingRequests, chatMessages: roomChatMessages, speakerInvitation, isMuted: roomIsMuted, myRole, canSpeak, hasRequested, elapsedTime, joinRoom, leaveRoom, promptToLeave, endRoomForAll, toggleMute, requestToSpeak, manageRequest, changeRole, acceptInvite, declineInvite, removeUser, selfPromoteToSpeaker, pinLink, unpinLink, updateRoomTitle, sendChatMessage, handlePictureUpload, isLeaving }}>
+        <AudioRoomContext.Provider value={{ roomData, participants, speakingRequests, chatMessages: roomChatMessages, speakerInvitation, isMuted: roomIsMuted, myRole, canSpeak, hasRequested, elapsedTime, joinRoom, leaveRoom, promptToLeave, endRoomForAll, toggleMute, requestToSpeak, manageRequest, changeRole, acceptInvite, declineInvite, removeUser, selfPromoteToSpeaker, pinLink, unpinLink, updateRoomTitle, sendChatMessage, handlePictureUpload }}>
             {children}
             {roomRemoteStreams.map(rs => <AudioPlayer key={rs.peerId} stream={rs.stream} />)}
             {p2pRemoteStream && <AudioPlayer stream={p2pRemoteStream} />}

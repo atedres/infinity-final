@@ -73,7 +73,7 @@ export default function AudioRoomPage() {
         isMuted, myRole, canSpeak, hasRequested, speakerInvitation, elapsedTime,
         chatMessages, toggleMute, requestToSpeak, manageRequest, changeRole,
         acceptInvite, declineInvite, removeUser, selfPromoteToSpeaker,
-        pinLink, unpinLink, updateRoomTitle, sendChatMessage, handlePictureUpload, endRoomForAll, isLeaving
+        pinLink, unpinLink, updateRoomTitle, sendChatMessage, handlePictureUpload, endRoomForAll
     } = useAudioRoom();
 
     const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -140,10 +140,10 @@ export default function AudioRoomPage() {
     }, []);
     
     useEffect(() => {
-        if (roomId && currentUser && !isLeaving) {
+        if (roomId && currentUser) {
             joinRoom(roomId);
         }
-    }, [roomId, currentUser, joinRoom, isLeaving]);
+    }, [roomId, currentUser, joinRoom]);
     
     useEffect(() => { 
         if (roomData) setNewRoomTitleText(roomData.title);
@@ -441,7 +441,7 @@ export default function AudioRoomPage() {
             </AlertDialog>
             <div className="mx-auto max-w-4xl space-y-8 pb-28">
                 <div className="text-left space-y-2">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
                         <h1 className="min-w-0 break-words text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl font-headline line-clamp-2">{roomData.title}</h1>
                         {isModerator && (
                              <Dialog open={isTitleEditDialogOpen} onOpenChange={setIsTitleEditDialogOpen}>
