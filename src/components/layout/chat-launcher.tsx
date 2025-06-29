@@ -61,6 +61,7 @@ interface AudioRoomContextType {
   canSpeak: boolean;
   hasRequested: boolean;
   elapsedTime: string;
+  isLeaving: boolean;
   joinRoom: (roomId: string) => void;
   leaveRoom: (options?: { navigate?: boolean }) => Promise<void>;
   promptToLeave: () => void;
@@ -132,6 +133,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
     const [roomRemoteStreams, setRoomRemoteStreams] = useState<RemoteStream[]>([]);
     const [showFloatingPlayer, setShowFloatingPlayer] = useState(false);
     const roomUnsubscribes = useRef<(() => void)[]>([]);
+    const [isLeaving, setIsLeaving] = useState(false);
 
     const cleanupAndResetLocalState = useCallback((navigate = false) => {
         // Stop all media tracks and destroy peer connections
@@ -187,25 +189,29 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
 
     // --- Audio Room Logic ---
     const leaveRoom = useCallback(async (options: { navigate?: boolean } = {}) => {
+        setIsLeaving(true);
         const roomId = currentRoomId; // Capture at the start
         if (!roomId || !currentUser || !db) {
-            // If we don't have what we need, just clean up locally.
             cleanupAndResetLocalState(options.navigate);
             return;
         }
-
+    
         try {
             const roomDocRef = doc(db, "audioRooms", roomId);
             const participantRef = doc(db, "audioRooms", roomId, "participants", currentUser.uid);
-
-            const batch = writeBatch(db);
-            batch.delete(participantRef);
-            batch.update(roomDocRef, { participantsCount: increment(-1) });
-            await batch.commit();
-
-            const updatedRoomSnap = await getDoc(roomDocRef);
-            if (updatedRoomSnap.exists() && updatedRoomSnap.data().participantsCount <= 0) {
-                await deleteDoc(roomDocRef);
+    
+            const roomDocSnap = await getDoc(roomDocRef);
+            if (roomDocSnap.exists()) {
+                const batch = writeBatch(db);
+                batch.delete(participantRef);
+                batch.update(roomDocRef, { participantsCount: increment(-1) });
+                await batch.commit();
+    
+                // Re-fetch the document to check the new count accurately.
+                const updatedRoomSnap = await getDoc(roomDocRef);
+                if (updatedRoomSnap.exists() && updatedRoomSnap.data().participantsCount <= 0) {
+                    await deleteDoc(roomDocRef);
+                }
             }
         } catch (error) {
             console.warn("Could not perform all firestore cleanup on leave. Room might have been deleted.", error);
@@ -223,6 +229,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
     };
 
     const joinRoom = useCallback(async (roomId: string) => {
+        setIsLeaving(false);
         if (currentRoomId === roomId || !currentUser || !db) return;
         if (currentRoomId) await leaveRoom({ navigate: false }); // Leave previous room if any
 
@@ -595,7 +602,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
     };
 
     return (
-        <AudioRoomContext.Provider value={{ roomData, participants, speakingRequests, chatMessages: roomChatMessages, speakerInvitation, isMuted: roomIsMuted, myRole, canSpeak, hasRequested, elapsedTime, joinRoom, leaveRoom, promptToLeave, endRoomForAll, toggleMute, requestToSpeak, manageRequest, changeRole, acceptInvite, declineInvite, removeUser, selfPromoteToSpeaker, pinLink, unpinLink, updateRoomTitle, sendChatMessage, handlePictureUpload }}>
+        <AudioRoomContext.Provider value={{ roomData, participants, speakingRequests, chatMessages: roomChatMessages, speakerInvitation, isMuted: roomIsMuted, myRole, canSpeak, hasRequested, elapsedTime, joinRoom, leaveRoom, promptToLeave, endRoomForAll, toggleMute, requestToSpeak, manageRequest, changeRole, acceptInvite, declineInvite, removeUser, selfPromoteToSpeaker, pinLink, unpinLink, updateRoomTitle, sendChatMessage, handlePictureUpload, isLeaving }}>
             {children}
             {roomRemoteStreams.map(rs => <AudioPlayer key={rs.peerId} stream={rs.stream} />)}
             {p2pRemoteStream && <AudioPlayer stream={p2pRemoteStream} />}

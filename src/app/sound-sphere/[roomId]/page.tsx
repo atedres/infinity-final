@@ -66,13 +66,14 @@ interface P2PChatMessage {
 
 export default function AudioRoomPage() {
     const { toast } = useToast();
-    const { roomId } = useParams() as { roomId: string };
+    const params = useParams();
+    const roomId = params.roomId as string;
     const { 
         joinRoom, promptToLeave, roomData, participants, speakingRequests,
         isMuted, myRole, canSpeak, hasRequested, speakerInvitation, elapsedTime,
         chatMessages, toggleMute, requestToSpeak, manageRequest, changeRole,
         acceptInvite, declineInvite, removeUser, selfPromoteToSpeaker,
-        pinLink, unpinLink, updateRoomTitle, sendChatMessage, handlePictureUpload, endRoomForAll
+        pinLink, unpinLink, updateRoomTitle, sendChatMessage, handlePictureUpload, endRoomForAll, isLeaving
     } = useAudioRoom();
 
     const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -139,10 +140,10 @@ export default function AudioRoomPage() {
     }, []);
     
     useEffect(() => {
-        if (roomId && currentUser) {
+        if (roomId && currentUser && !isLeaving) {
             joinRoom(roomId);
         }
-    }, [roomId, currentUser, joinRoom]);
+    }, [roomId, currentUser, joinRoom, isLeaving]);
     
     useEffect(() => { 
         if (roomData) setNewRoomTitleText(roomData.title);
