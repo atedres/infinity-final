@@ -158,7 +158,6 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                             <Link href={`/profile/${comment.authorId}`} className="font-semibold text-xs hover:underline">{comment.authorName}</Link>
-                            <span className="text-xs text-muted-foreground">{comment.createdAt ? formatDistanceToNow(comment.createdAt.toDate(), { addSuffix: true }) : ''}</span>
                         </div>
                         {isAuthor && (
                             <DropdownMenu>
@@ -202,16 +201,15 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                     )}
                 </div>
             </div>
-            <div className="ml-11 flex items-center gap-2">
-                 <div className="pt-1 flex items-center gap-2">
-                    <Button variant="ghost" size="sm" className="text-xs h-auto p-0 flex items-center gap-1" onClick={() => onLikeComment(post.id, comment.id)} disabled={!user}>
-                        <Heart fill={isLiked ? 'currentColor' : 'none'} className={`h-3 w-3 ${isLiked ? 'text-red-500' : ''}`} /> 
-                        {comment.likes > 0 && <span>{comment.likes}</span>}
-                    </Button>
-                    <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => onSetReplyingTo(isReplyingToThis ? null : comment.id)} disabled={!user}>
-                        Reply
-                    </Button>
-                </div>
+            <div className="ml-11 flex items-center gap-4 pt-1 text-xs text-muted-foreground">
+                <Button variant="ghost" size="sm" className="h-auto p-0 flex items-center gap-1 hover:text-red-500" onClick={() => onLikeComment(post.id, comment.id)} disabled={!user}>
+                    <Heart fill={isLiked ? 'currentColor' : 'none'} className={cn('h-3 w-3', isLiked ? 'text-red-500' : 'text-muted-foreground')} /> 
+                    {comment.likes > 0 && <span className={cn(isLiked && 'text-red-500 font-semibold')}>{comment.likes}</span>}
+                </Button>
+                <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => onSetReplyingTo(isReplyingToThis ? null : comment.id)} disabled={!user}>
+                    Reply
+                </Button>
+                <span className="text-muted-foreground">{comment.createdAt ? formatDistanceToNow(comment.createdAt.toDate(), { addSuffix: true }) : ''}</span>
             </div>
 
             {isReplyingToThis && (
@@ -224,7 +222,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
             )}
 
             {replies.length > 0 && (
-                 <div className={cn("mt-3 space-y-3 border-l-2 border-muted", depth < 1 ? "pl-4" : "")}>
+                 <div className={cn("mt-3 space-y-3", depth < 1 ? "pl-4 border-l-2 border-muted" : "")}>
                     {repliesToShow.map(reply => (
                         <CommentThread 
                             key={reply.id} 
