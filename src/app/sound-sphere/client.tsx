@@ -1140,6 +1140,19 @@ export default function SoundSphereClient() {
         }
     };
 
+    const sortedTopLevelComments = useMemo(() => {
+        const topLevelComments = postComments.filter(comment => !comment.parentId);
+        return [...topLevelComments].sort((a, b) => {
+            const timeA = a.createdAt?.toDate().getTime() || 0;
+            const timeB = b.createdAt?.toDate().getTime() || 0;
+            if (commentSortOrder === 'asc') {
+                return timeA - timeB;
+            } else {
+                return timeB - timeA;
+            }
+        });
+    }, [postComments, commentSortOrder]);
+
 
     return (
         <>
@@ -1227,20 +1240,7 @@ export default function SoundSphereClient() {
                             {posts.map((post) => {
                                 const isPostOwner = user && user.uid === post.authorId;
                                 const isEditable = post.createdAt && (new Date().getTime() - post.createdAt.toDate().getTime()) < 15 * 60 * 1000;
-                                const topLevelComments = postComments.filter(comment => !comment.parentId);
                                 
-                                const sortedTopLevelComments = useMemo(() => {
-                                    return [...topLevelComments].sort((a, b) => {
-                                        const timeA = a.createdAt?.toDate().getTime() || 0;
-                                        const timeB = b.createdAt?.toDate().getTime() || 0;
-                                        if (commentSortOrder === 'asc') {
-                                            return timeA - timeB;
-                                        } else {
-                                            return timeB - timeA;
-                                        }
-                                    });
-                                }, [topLevelComments, commentSortOrder]);
-
                                 return (
                                 <Card key={post.id} id={`post-${post.id}`}>
                                     <CardContent className="p-6">
@@ -1387,7 +1387,7 @@ export default function SoundSphereClient() {
                                                             </Button>
                                                         </form>
 
-                                                        {topLevelComments.length > 0 && (
+                                                        {sortedTopLevelComments.length > 0 && (
                                                             <div className="flex items-center justify-end my-4">
                                                                 <Label htmlFor={`sort-comments-${post.id}`} className="text-sm mr-2 text-muted-foreground">Sort by:</Label>
                                                                 <Select value={commentSortOrder} onValueChange={(value) => setCommentSortOrder(value as 'asc' | 'desc')}>
