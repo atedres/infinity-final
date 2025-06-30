@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
@@ -18,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { db, auth, storage } from '@/lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
@@ -344,6 +345,7 @@ export default function SoundSphereClient() {
     const [viewingCommentsFor, setViewingCommentsFor] = useState<string | null>(null);
     const [commentContent, setCommentContent] = useState('');
     const [postComments, setPostComments] = useState<Comment[]>([]);
+    const [commentSortOrder, setCommentSortOrder] = useState<'asc' | 'desc'>('asc');
     const [replyingTo, setReplyingTo] = useState<string | null>(null);
     const [initiallyExpandedThreads, setInitiallyExpandedThreads] = useState<Set<string>>(new Set());
     
@@ -418,9 +420,11 @@ export default function SoundSphereClient() {
         if (viewingCommentsFor === postId) {
             setViewingCommentsFor(null);
             setPostComments([]);
+            setCommentSortOrder('asc'); // Reset on close
         } else {
             setViewingCommentsFor(postId);
             setReplyingTo(null);
+            setCommentSortOrder('asc'); // Reset on open
             const commentsQuery = query(collection(db, "posts", postId, "comments"), orderBy("createdAt", "asc"));
             const querySnapshot = await getDocs(commentsQuery);
             const commentsList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Comment);
@@ -1024,7 +1028,6 @@ export default function SoundSphereClient() {
             batch.update(postRef, { comments: increment(-numToDelete) });
 
             await batch.commit();
-            toast({ title: "Comment Deleted" });
             
             // Update post comment count in local state
             setPosts(prevPosts => prevPosts.map(p => 
@@ -1036,6 +1039,7 @@ export default function SoundSphereClient() {
                 const deletedIds = new Set([commentId]);
                 repliesSnapshot.forEach(doc => deletedIds.add(doc.id));
                 setPostComments(prevComments => prevComments.filter(c => !deletedIds.has(c.id)));
+                toast({ title: "Comment Deleted" });
             }
         } catch (error) {
             console.error("Error deleting comment:", error);
@@ -1225,6 +1229,18 @@ export default function SoundSphereClient() {
                                 const isEditable = post.createdAt && (new Date().getTime() - post.createdAt.toDate().getTime()) < 15 * 60 * 1000;
                                 const topLevelComments = postComments.filter(comment => !comment.parentId);
                                 
+                                const sortedTopLevelComments = useMemo(() => {
+                                    return [...topLevelComments].sort((a, b) => {
+                                        const timeA = a.createdAt?.toDate().getTime() || 0;
+                                        const timeB = b.createdAt?.toDate().getTime() || 0;
+                                        if (commentSortOrder === 'asc') {
+                                            return timeA - timeB;
+                                        } else {
+                                            return timeB - timeA;
+                                        }
+                                    });
+                                }, [topLevelComments, commentSortOrder]);
+
                                 return (
                                 <Card key={post.id} id={`post-${post.id}`}>
                                     <CardContent className="p-6">
@@ -1370,9 +1386,25 @@ export default function SoundSphereClient() {
                                                                 <Send className="h-4 w-4" />
                                                             </Button>
                                                         </form>
+
+                                                        {topLevelComments.length > 0 && (
+                                                            <div className="flex items-center justify-end my-4">
+                                                                <Label htmlFor={`sort-comments-${post.id}`} className="text-sm mr-2 text-muted-foreground">Sort by:</Label>
+                                                                <Select value={commentSortOrder} onValueChange={(value) => setCommentSortOrder(value as 'asc' | 'desc')}>
+                                                                    <SelectTrigger id={`sort-comments-${post.id}`} className="w-[160px] h-9 text-sm">
+                                                                        <SelectValue />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        <SelectItem value="asc">Oldest First</SelectItem>
+                                                                        <SelectItem value="desc">Newest First</SelectItem>
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            </div>
+                                                        )}
+
                                                         <div className="mt-4">
                                                             <div className="space-y-4">
-                                                                {topLevelComments.map(comment => (
+                                                                {sortedTopLevelComments.map(comment => (
                                                                      <CommentThread
                                                                         key={comment.id}
                                                                         comment={comment}
