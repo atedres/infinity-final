@@ -22,7 +22,6 @@ import { useToast } from '@/hooks/use-toast';
 import { db, auth, storage } from '@/lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, addDoc, getDocs, serverTimestamp, query, orderBy, where, doc, setDoc, deleteDoc, getDoc, updateDoc, increment, Timestamp, onSnapshot, writeBatch } from 'firebase/firestore';
-import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -100,6 +99,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
     onUpdateComment: (postId: string, commentId: string, newText: string) => void;
     initiallyExpandedThreads: Set<string>;
 }) => {
+    const commentRef = useRef<HTMLDivElement>(null);
     const [replyContent, setReplyContent] = useState('');
     const [isEditing, setIsEditing] = useState(false);
     const [editedContent, setEditedContent] = useState(comment.text);
@@ -114,7 +114,25 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
     const isLiked = likedComments.has(comment.id);
     const isEditable = comment.createdAt && (new Date().getTime() - comment.createdAt.toDate().getTime()) < 15 * 60 * 1000;
     
-    // --- New Logic ---
+    useEffect(() => {
+        const hash = window.location.hash;
+        if (hash === `#comment-${comment.id}`) {
+            const element = commentRef.current;
+            if (element) {
+                setTimeout(() => {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    element.classList.add('bg-accent/20', 'transition-colors', 'duration-1000', 'rounded-lg');
+                    const timeoutId = setTimeout(() => {
+                        element.classList.remove('bg-accent/20', 'transition-colors', 'duration-1000', 'rounded-lg');
+                    }, 2500);
+                    // Clean up the hash from the URL to prevent re-triggering
+                    history.replaceState(null, '', window.location.pathname + window.location.search);
+                }, 150); // Small delay to allow layout to settle
+            }
+        }
+    }, [comment.id]);
+
+
     const getFullReplyCount = (startCommentId: string): number => {
         const children = allComments.filter(c => c.parentId === startCommentId);
         let count = children.length;
@@ -209,7 +227,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
 
 
     return (
-        <div key={comment.id} id={`comment-${comment.id}`}>
+        <div key={comment.id} id={`comment-${comment.id}`} ref={commentRef}>
             <AlertDialog open={isDeleteAlertOpen} onOpenChange={setIsDeleteAlertOpen}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
@@ -298,7 +316,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                 </div>
             )}
             
-            <div className={cn("mt-3 space-y-3", depth < 1 && "pl-4 border-l-2")}>
+            <div className={cn("mt-3 space-y-3", depth < 1 ? "pl-4 border-l-2" : "pl-0")}>
                 {renderReplies()}
             </div>
         </div>
@@ -448,33 +466,6 @@ export default function SoundSphereClient() {
         }
     }, [searchParams, posts, toggleCommentsView]);
     
-    useEffect(() => {
-        const hash = window.location.hash;
-        if (!hash.startsWith('#comment-')) return;
-        
-        const elementId = hash.substring(1);
-        let attempts = 0;
-        const intervalId = setInterval(() => {
-            const element = document.getElementById(elementId);
-
-            if (element) {
-                clearInterval(intervalId);
-                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                element.classList.add('bg-accent/20', 'transition-colors', 'duration-1000', 'rounded-lg');
-                setTimeout(() => {
-                    element.classList.remove('bg-accent/20', 'transition-colors', 'duration-1000', 'rounded-lg');
-                }, 2500);
-            } else {
-                attempts++;
-                if (attempts > 30) { // Stop after 3 seconds
-                    clearInterval(intervalId);
-                }
-            }
-        }, 100);
-
-        return () => clearInterval(intervalId);
-    }, [postComments, initiallyExpandedThreads]);
-
     useEffect(() => {
         if (!auth || !db) return;
 
