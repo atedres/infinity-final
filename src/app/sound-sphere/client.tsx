@@ -84,7 +84,7 @@ interface ProfileUser {
 
 
 // Recursive component for rendering a comment and its replies
-const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyingTo, replyingTo, user, depth = 0, renderSubtree = true, likedComments, onLikeComment, onDeleteComment, onUpdateComment }: {
+const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyingTo, replyingTo, user, depth = 0, renderSubtree = true, likedComments, onLikeComment, onDeleteComment, onUpdateComment, initiallyExpandedThreads }: {
     comment: Comment;
     post: Post;
     allComments: Comment[];
@@ -98,6 +98,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
     onLikeComment: (postId: string, commentId: string) => void;
     onDeleteComment: (postId: string, commentId: string) => void;
     onUpdateComment: (postId: string, commentId: string, newText: string) => void;
+    initiallyExpandedThreads: Set<string>;
 }) => {
     const [replyContent, setReplyContent] = useState('');
     const [isEditing, setIsEditing] = useState(false);
@@ -105,7 +106,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
     const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
     
     // State for top-level comment expansion
-    const [isExpanded, setIsExpanded] = useState(false);
+    const [isExpanded, setIsExpanded] = useState(() => initiallyExpandedThreads.has(comment.id));
 
     const replies = allComments.filter(c => c.parentId === comment.id);
     const isReplyingToThis = replyingTo === comment.id;
@@ -168,6 +169,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                             onLikeComment={onLikeComment}
                             onDeleteComment={onDeleteComment}
                             onUpdateComment={onUpdateComment}
+                            initiallyExpandedThreads={initiallyExpandedThreads}
                         />
                     ))}
                     {showToggleButtons && !isExpanded && (
@@ -199,6 +201,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                     onLikeComment={onLikeComment}
                     onDeleteComment={onDeleteComment}
                     onUpdateComment={onUpdateComment}
+                    initiallyExpandedThreads={initiallyExpandedThreads}
                 />
             ));
         }
@@ -295,7 +298,7 @@ const CommentThread = ({ comment, post, allComments, onReplySubmit, onSetReplyin
                 </div>
             )}
             
-            <div className={cn("mt-3 space-y-3", depth < 1 ? "pl-4 border-l-2" : "")}>
+            <div className={cn("mt-3 space-y-3", depth < 1 && "pl-4 border-l-2")}>
                 {renderReplies()}
             </div>
         </div>
@@ -324,6 +327,7 @@ export default function SoundSphereClient() {
     const [commentContent, setCommentContent] = useState('');
     const [postComments, setPostComments] = useState<Comment[]>([]);
     const [replyingTo, setReplyingTo] = useState<string | null>(null);
+    const [initiallyExpandedThreads, setInitiallyExpandedThreads] = useState<Set<string>>(new Set());
     
     // Dialog states
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -403,6 +407,23 @@ export default function SoundSphereClient() {
             const querySnapshot = await getDocs(commentsQuery);
             const commentsList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Comment);
             setPostComments(commentsList);
+            
+            const hash = window.location.hash;
+            if (hash.startsWith('#comment-')) {
+                const targetCommentId = hash.substring('#comment-'.length);
+                const targetComment = commentsList.find(c => c.id === targetCommentId);
+
+                if (targetComment && targetComment.parentId) { 
+                    let topLevelParent = targetComment;
+                    while (topLevelParent.parentId) {
+                        const nextParent = commentsList.find(c => c.id === topLevelParent.parentId);
+                        if (!nextParent) break;
+                        topLevelParent = nextParent;
+                    }
+                    setInitiallyExpandedThreads(prev => new Set(prev).add(topLevelParent.id));
+                }
+            }
+
 
             if (user) {
                 const newLikedComments = new Set(likedComments);
@@ -429,20 +450,30 @@ export default function SoundSphereClient() {
     
     useEffect(() => {
         const hash = window.location.hash;
-        if (hash) {
-            const elementId = hash.substring(1);
+        if (!hash.startsWith('#comment-')) return;
+        
+        const elementId = hash.substring(1);
+        let attempts = 0;
+        const intervalId = setInterval(() => {
             const element = document.getElementById(elementId);
+
             if (element) {
+                clearInterval(intervalId);
+                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                element.classList.add('bg-accent/20', 'transition-colors', 'duration-1000', 'rounded-lg');
                 setTimeout(() => {
-                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    element.classList.add('bg-accent/20', 'transition-colors', 'duration-1000', 'rounded-lg');
-                    setTimeout(() => {
-                        element.classList.remove('bg-accent/20', 'transition-colors', 'duration-1000', 'rounded-lg');
-                    }, 2500);
-                }, 500);
+                    element.classList.remove('bg-accent/20', 'transition-colors', 'duration-1000', 'rounded-lg');
+                }, 2500);
+            } else {
+                attempts++;
+                if (attempts > 30) { // Stop after 3 seconds
+                    clearInterval(intervalId);
+                }
             }
-        }
-    }, [postComments]);
+        }, 100);
+
+        return () => clearInterval(intervalId);
+    }, [postComments, initiallyExpandedThreads]);
 
     useEffect(() => {
         if (!auth || !db) return;
@@ -1364,6 +1395,7 @@ export default function SoundSphereClient() {
                                                                         onLikeComment={handleLikeComment}
                                                                         onDeleteComment={handleDeleteComment}
                                                                         onUpdateComment={handleUpdateComment}
+                                                                        initiallyExpandedThreads={initiallyExpandedThreads}
                                                                     />
                                                                 ))}
                                                             </div>
@@ -1603,4 +1635,3 @@ export default function SoundSphereClient() {
         </>
     );
 }
-
