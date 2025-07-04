@@ -26,7 +26,7 @@ export async function startupConsultant(
 const consultantPrompt = ai.definePrompt({
   name: 'startupConsultantPrompt',
   input: {schema: StartupConsultantInputSchema},
-  output: {schema: StartupConsultantOutputSchema},
+  output: {schema: StartupConsultantOutputSchema.optional()},
   prompt: `You are an expert startup consultant with years of experience advising early-stage companies. Your clients are founders who need clear, actionable, and encouraging advice.
 
   A founder has the following question:
