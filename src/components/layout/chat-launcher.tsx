@@ -460,7 +460,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
             snapshot.docChanges().forEach(async (change) => {
                 if (change.type === 'added') {
                     const data = change.doc.data();
-                    const signal = JSON.parse(data.signal);
+                    const signal = typeof data.signal === 'string' ? JSON.parse(data.signal) : data.signal;
                     
                     if (data.type === 'p2p-call' && signal.type === 'offer' && callStateRef.current === 'idle') {
                         setIncomingCall({ fromId: data.from, fromName: data.fromName, fromAvatar: data.fromAvatar, chatId: data.chatId, signal: data.signal, });
@@ -489,6 +489,24 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
         });
         return () => unsubscribe();
     }, [currentUser, toast, currentRoomId]);
+
+    useEffect(() => {
+        if (!selectedChat || !currentUser || !db) {
+            setMessages([]); // Clear messages when no chat is selected
+            return;
+        }
+
+        const messagesRef = collection(db, "chats", selectedChat.id, "messages");
+        const q = query(messagesRef, orderBy("timestamp", "asc"));
+        
+        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+            const chatMessages = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as ChatMessage);
+            setMessages(chatMessages);
+        });
+
+        // Cleanup function for this effect
+        return () => unsubscribe();
+    }, [selectedChat, currentUser, db]);
 
     useEffect(() => {
         if (!currentUser || !db) return;
@@ -551,7 +569,8 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
         peer.on('stream', (remoteStream) => setP2PRemoteStream(remoteStream));
         peer.on('close', () => endP2PCall(false));
         peer.on('error', (err) => endP2PCall(false));
-        peer.signal(JSON.parse(incomingCall.signal));
+        const parsedSignal = typeof incomingCall.signal === 'string' ? JSON.parse(incomingCall.signal) : incomingCall.signal;
+        peer.signal(parsedSignal);
         setIncomingCall(null);
     };
     const declineP2PCall = async () => {
@@ -715,3 +734,5 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
         </AudioRoomContext.Provider>
     );
 }
+
+    
