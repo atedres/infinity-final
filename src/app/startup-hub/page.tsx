@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, collection, getDocs } from "firebase/firestore";
@@ -11,13 +11,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { BookOpen, Target, CheckCircle2, Bot, Sparkles } from "lucide-react";
+import { BookOpen, Target, CheckCircle2, Bot, Send, User } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { db, auth } from "@/lib/firebase";
 import { startupConsultant } from '@/ai/flows/startup-consultant-flow';
+import { cn } from '@/lib/utils';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { ScrollArea } from '@/components/ui/scroll-area';
+
 
 const deadlines = [
     { task: "User Authentication Flow", due: "3 days", status: "In Progress" },
@@ -36,6 +40,11 @@ interface Startup {
     name: string;
 }
 
+interface ConsultantMessage {
+    role: 'user' | 'assistant';
+    content: string;
+}
+
 export default function StartupHubPage() {
     const { toast } = useToast();
     const router = useRouter();
@@ -45,9 +54,13 @@ export default function StartupHubPage() {
     const [courses, setCourses] = useState<Course[]>([]);
     
     // AI Consultant state
+    const [consultantMessages, setConsultantMessages] = useState<ConsultantMessage[]>([
+        { role: 'assistant', content: 'Hello! I am your AI startup consultant. How can I help you today?' }
+    ]);
     const [consultantQuery, setConsultantQuery] = useState('');
-    const [consultantResponse, setConsultantResponse] = useState('');
     const [isConsultantLoading, setIsConsultantLoading] = useState(false);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+
 
     useEffect(() => {
         if (!auth || !db) {
@@ -84,6 +97,10 @@ export default function StartupHubPage() {
 
         return () => unsubscribe();
     }, [router, toast]);
+    
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [consultantMessages, isConsultantLoading]);
 
     const fetchCourses = async () => {
         if (!db) return;
@@ -98,15 +115,21 @@ export default function StartupHubPage() {
     
     const handleConsultantSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!consultantQuery.trim()) return;
+        if (!consultantQuery.trim() || isConsultantLoading) return;
 
+        const newMessages: ConsultantMessage[] = [...consultantMessages, { role: 'user', content: consultantQuery }];
+        setConsultantMessages(newMessages);
+        const currentQuery = consultantQuery;
+        setConsultantQuery('');
         setIsConsultantLoading(true);
-        setConsultantResponse('');
+
         try {
-            const response = await startupConsultant(consultantQuery);
-            setConsultantResponse(response);
+            const response = await startupConsultant(currentQuery);
+            setConsultantMessages(prev => [...prev, { role: 'assistant', content: response }]);
         } catch (error) {
             console.error("Error with AI consultant:", error);
+            const errorMessage = "I'm having trouble connecting right now. Please try again in a moment.";
+            setConsultantMessages(prev => [...prev, { role: 'assistant', content: errorMessage }]);
             toast({ title: "AI Error", description: "Could not get a response from the consultant.", variant: "destructive" });
         } finally {
             setIsConsultantLoading(false);
@@ -160,38 +183,73 @@ export default function StartupHubPage() {
                     </div>
                 </TabsContent>
 
-                <TabsContent value="consultant" className="mt-6">
-                    <Card>
+                 <TabsContent value="consultant" className="mt-6">
+                    <Card className="flex flex-col h-[70vh]">
                         <CardHeader>
                             <CardTitle className="flex items-center gap-2"><Bot className="h-6 w-6 text-primary" /> AI Startup Consultant</CardTitle>
-                            <CardDescription>Ask for advice on strategy, marketing, product, or any other business challenge.</CardDescription>
+                            <CardDescription>Your personal AI advisor for strategy, marketing, and growth.</CardDescription>
                         </CardHeader>
-                        <CardContent className="space-y-4">
-                            <form onSubmit={handleConsultantSubmit} className="space-y-4">
+                        <CardContent className="flex-1 p-0">
+                           <ScrollArea className="h-full w-full">
+                                <div className="space-y-6 p-6">
+                                {consultantMessages.map((message, index) => (
+                                    <div key={index} className={cn("flex items-start gap-3 w-full", message.role === 'user' ? 'justify-end' : 'justify-start')}>
+                                        {message.role === 'assistant' && (
+                                            <Avatar className="h-8 w-8 border">
+                                                <AvatarFallback><Bot className="h-5 w-5 text-primary"/></AvatarFallback>
+                                            </Avatar>
+                                        )}
+                                        <div className={cn(
+                                            "max-w-xl rounded-lg p-3 text-sm",
+                                            message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted'
+                                        )}>
+                                            <p className="whitespace-pre-wrap">{message.content}</p>
+                                        </div>
+                                        {message.role === 'user' && (
+                                            <Avatar className="h-8 w-8 border">
+                                                <AvatarFallback><User className="h-5 w-5 text-primary"/></AvatarFallback>
+                                            </Avatar>
+                                        )}
+                                    </div>
+                                ))}
+                                {isConsultantLoading && (
+                                    <div className="flex items-start gap-3">
+                                        <Avatar className="h-8 w-8 border">
+                                            <AvatarFallback><Bot className="h-5 w-5 text-primary"/></AvatarFallback>
+                                        </Avatar>
+                                        <div className="bg-muted rounded-lg p-3">
+                                            <div className="flex items-center justify-center gap-1.5 py-1">
+                                                <span className="h-2 w-2 rounded-full bg-muted-foreground animate-pulse delay-0"></span>
+                                                <span className="h-2 w-2 rounded-full bg-muted-foreground animate-pulse [animation-delay:0.2s]"></span>
+                                                <span className="h-2 w-2 rounded-full bg-muted-foreground animate-pulse [animation-delay:0.4s]"></span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                                <div ref={messagesEndRef} />
+                                </div>
+                            </ScrollArea>
+                        </CardContent>
+                        <div className="p-4 border-t bg-background">
+                            <form onSubmit={handleConsultantSubmit} className="flex items-start gap-2">
                                 <Textarea 
-                                    placeholder="e.g., What are some effective low-budget marketing strategies for a new SaaS product?" 
+                                    placeholder="Ask about marketing, strategy, funding..." 
                                     value={consultantQuery}
                                     onChange={e => setConsultantQuery(e.target.value)}
-                                    rows={4}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault();
+                                            handleConsultantSubmit(e as any);
+                                        }
+                                    }}
+                                    rows={1}
+                                    className="flex-1 resize-none"
                                 />
-                                <Button type="submit" disabled={isConsultantLoading || !consultantQuery.trim()}>
-                                    {isConsultantLoading ? 'Thinking...' : 'Ask Consultant'}
+                                <Button type="submit" size="icon" disabled={isConsultantLoading || !consultantQuery.trim()}>
+                                    <Send className="h-4 w-4" />
                                 </Button>
                             </form>
-                            
-                            {(isConsultantLoading || consultantResponse) && (
-                                <Card className="bg-muted/50">
-                                    <CardHeader><CardTitle className="flex items-center gap-2 text-lg"><Sparkles className="h-5 w-5 text-primary"/>Consultant's Advice</CardTitle></CardHeader>
-                                    <CardContent>
-                                        {isConsultantLoading ? (
-                                             <div className="space-y-2"><div className="animate-pulse bg-muted-foreground/20 h-4 w-full rounded-md"></div><div className="animate-pulse bg-muted-foreground/20 h-4 w-5/6 rounded-md"></div><div className="animate-pulse bg-muted-foreground/20 h-4 w-3/4 rounded-md"></div></div>
-                                        ) : (
-                                            <p className="whitespace-pre-wrap">{consultantResponse}</p>
-                                        )}
-                                    </CardContent>
-                                </Card>
-                            )}
-                        </CardContent>
+                        </div>
                     </Card>
                 </TabsContent>
             </Tabs>
