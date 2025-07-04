@@ -1,4 +1,3 @@
-
 'use server';
 /**
  * @fileOverview An AI flow that acts as a startup consultant.
@@ -26,7 +25,7 @@ export async function startupConsultant(
 const consultantPrompt = ai.definePrompt({
   name: 'startupConsultantPrompt',
   input: {schema: StartupConsultantInputSchema},
-  output: {schema: StartupConsultantOutputSchema.optional()},
+  output: {schema: StartupConsultantOutputSchema.nullable()},
   prompt: `You are an expert startup consultant with years of experience advising early-stage companies. Your clients are founders who need clear, actionable, and encouraging advice.
 
   A founder has the following question:
