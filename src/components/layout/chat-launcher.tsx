@@ -13,8 +13,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { db, auth, storage } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetFooter } from '@/components/ui/sheet';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogHeader, AlertDialogFooter, AlertDialogTitle as AlertDialogTitleComponent } from "@/components/ui/alert-dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogHeader, AlertDialogFooter, AlertDialogTitle as AlertDialogTitleComponent, AlertDialogDescription } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -116,6 +116,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
     const outgoingCallAudioRef = useRef<HTMLAudioElement | null>(null);
     const p2pLocalStreamRef = useRef<MediaStream | null>(null);
     const [p2pRemoteStream, setP2PRemoteStream] = useState<MediaStream | null>(null);
+    const messageListenerUnsubscribe = useRef<() => void | null>(null);
     
     // --- Audio Room State ---
     const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
@@ -491,29 +492,33 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
     }, [currentUser, toast, currentRoomId]);
 
     useEffect(() => {
-        if (!selectedChat || !currentUser || !db) {
-            setMessages([]); // Clear messages when no chat is selected
-            return;
-        }
-
-        const messagesRef = collection(db, "chats", selectedChat.id, "messages");
-        const q = query(messagesRef, orderBy("timestamp", "asc"));
-        
-        let msgUnsubscribe: () => void;
-        if (db && selectedChat) {
-          msgUnsubscribe = onSnapshot(q, (querySnapshot) => {
-              const chatMessages = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as ChatMessage);
-              setMessages(chatMessages);
-          });
+        // Clear previous listener if it exists
+        if (messageListenerUnsubscribe.current) {
+          messageListenerUnsubscribe.current();
+          messageListenerUnsubscribe.current = null;
         }
     
-        // Cleanup function for this effect
+        if (!selectedChat || !currentUser || !db) {
+          setMessages([]);
+          return;
+        }
+    
+        const messagesRef = collection(db, 'chats', selectedChat.id, 'messages');
+        const q = query(messagesRef, orderBy('timestamp', 'asc'));
+    
+        messageListenerUnsubscribe.current = onSnapshot(q, (querySnapshot) => {
+          const chatMessages = querySnapshot.docs.map(
+            (doc) => ({ id: doc.id, ...doc.data() } as ChatMessage)
+          );
+          setMessages(chatMessages);
+        });
+    
         return () => {
-          if (msgUnsubscribe) {
-            msgUnsubscribe();
+          if (messageListenerUnsubscribe.current) {
+            messageListenerUnsubscribe.current();
           }
         };
-    }, [selectedChat, currentUser, db]);
+      }, [selectedChat, currentUser, db]);
 
     useEffect(() => {
         if (!currentUser || !db) return;
@@ -639,9 +644,9 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitleComponent>Incoming Call</AlertDialogTitleComponent>
-                        <DialogDescription>
+                        <AlertDialogDescription>
                             {incomingCall?.fromName} is calling you.
-                        </DialogDescription>
+                        </AlertDialogDescription>
                     </AlertDialogHeader>
                      <div className="flex justify-center py-4">
                         <Avatar className="h-24 w-24">
