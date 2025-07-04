@@ -13,8 +13,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { db, auth, storage } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetFooter } from '@/components/ui/sheet';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogHeader, AlertDialogFooter, AlertDialogTitle, AlertDialogDescription } from "@/components/ui/alert-dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogHeader, AlertDialogFooter, AlertDialogTitle as AlertDialogTitleComponent } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -499,13 +499,20 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
         const messagesRef = collection(db, "chats", selectedChat.id, "messages");
         const q = query(messagesRef, orderBy("timestamp", "asc"));
         
-        const unsubscribe = onSnapshot(q, (querySnapshot) => {
-            const chatMessages = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as ChatMessage);
-            setMessages(chatMessages);
-        });
-
+        let msgUnsubscribe: () => void;
+        if (db && selectedChat) {
+          msgUnsubscribe = onSnapshot(q, (querySnapshot) => {
+              const chatMessages = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as ChatMessage);
+              setMessages(chatMessages);
+          });
+        }
+    
         // Cleanup function for this effect
-        return () => unsubscribe();
+        return () => {
+          if (msgUnsubscribe) {
+            msgUnsubscribe();
+          }
+        };
     }, [selectedChat, currentUser, db]);
 
     useEffect(() => {
@@ -600,8 +607,10 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
         return (
             <Dialog open={p2pCallState === 'calling' || p2pCallState === 'active'} onOpenChange={(open) => !open && endP2PCall()}>
                 <DialogContent>
-                    <div className="flex flex-col items-center gap-6 p-8">
-                        <p className="text-lg font-medium">{title}</p>
+                     <DialogHeader className="text-center">
+                        <DialogTitle>{title}</DialogTitle>
+                    </DialogHeader>
+                    <div className="flex flex-col items-center gap-6 pt-4">
                         <Avatar className="h-24 w-24">
                             <AvatarImage src={otherParticipant?.avatar} />
                             <AvatarFallback>{otherParticipant?.name?.[0]}</AvatarFallback>
@@ -629,10 +638,10 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
             <AlertDialog open={p2pCallState === 'receiving'}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle>Incoming Call</AlertDialogTitle>
-                        <AlertDialogDescription>
+                        <AlertDialogTitleComponent>Incoming Call</AlertDialogTitleComponent>
+                        <DialogDescription>
                             {incomingCall?.fromName} is calling you.
-                        </AlertDialogDescription>
+                        </DialogDescription>
                     </AlertDialogHeader>
                      <div className="flex justify-center py-4">
                         <Avatar className="h-24 w-24">
@@ -734,5 +743,3 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
         </AudioRoomContext.Provider>
     );
 }
-
-    
