@@ -44,6 +44,6 @@ const startupConsultantFlow = ai.defineFlow(
   async (prompt) => {
     const {output} = await consultantPrompt(prompt);
     // Ensure we always return a string to match the schema, even if the model returns null.
-    return output || '';
+    return output || "I'm sorry, I couldn't generate a response for that. Could you please try rephrasing your question?";
   }
 );
