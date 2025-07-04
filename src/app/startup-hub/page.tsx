@@ -1,17 +1,16 @@
-
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, collection, getDocs } from "firebase/firestore";
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { doc, getDoc, collection, getDocs, query, orderBy, serverTimestamp, writeBatch } from "firebase/firestore";
 
 import { SubpageLayout } from "@/components/layout/subpage-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { BookOpen, Target, CheckCircle2, Bot, Send, User } from "lucide-react";
+import { BookOpen, Target, CheckCircle2, Bot, Send, User as UserIcon } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
@@ -52,11 +51,10 @@ export default function StartupHubPage() {
     const [isAuthorized, setIsAuthorized] = useState(false);
     const [startup, setStartup] = useState<Startup | null>(null);
     const [courses, setCourses] = useState<Course[]>([]);
+    const [user, setUser] = useState<User | null>(null);
     
     // AI Consultant state
-    const [consultantMessages, setConsultantMessages] = useState<ConsultantMessage[]>([
-        { role: 'assistant', content: 'Hello! I am your AI startup consultant. How can I help you today?' }
-    ]);
+    const [consultantMessages, setConsultantMessages] = useState<ConsultantMessage[]>([]);
     const [consultantQuery, setConsultantQuery] = useState('');
     const [isConsultantLoading, setIsConsultantLoading] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -67,9 +65,10 @@ export default function StartupHubPage() {
             router.push('/');
             return;
         }
-        const unsubscribe = onAuthStateChanged(auth, async (user) => {
-            if (user) {
-                const userDocRef = doc(db, "users", user.uid);
+        const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+            if (currentUser) {
+                setUser(currentUser);
+                const userDocRef = doc(db, "users", currentUser.uid);
                 const userDocSnap = await getDoc(userDocRef);
 
                 if (userDocSnap.exists() && userDocSnap.data().startupId) {
@@ -80,6 +79,7 @@ export default function StartupHubPage() {
                         setStartup({ id: startupDocSnap.id, ...startupDocSnap.data() } as Startup);
                         setIsAuthorized(true);
                         fetchCourses();
+                        fetchConsultantHistory(currentUser.uid);
                     } else {
                          toast({ title: "Error", description: "Associated startup not found.", variant: "destructive" });
                          router.push('/');
@@ -112,20 +112,50 @@ export default function StartupHubPage() {
             console.error("Error fetching courses: ", error);
         }
     };
+
+    const fetchConsultantHistory = async (userId: string) => {
+        if (!db) return;
+        const messagesRef = collection(db, "users", userId, "consultantMessages");
+        const q = query(messagesRef, orderBy("createdAt", "asc"));
+        const querySnapshot = await getDocs(q);
+
+        if (querySnapshot.empty) {
+            setConsultantMessages([
+                { role: 'assistant', content: 'Hello! I am your AI startup consultant. How can I help you today?' }
+            ]);
+        } else {
+            const history = querySnapshot.docs.map(doc => doc.data() as ConsultantMessage);
+            setConsultantMessages(history);
+        }
+    };
     
     const handleConsultantSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!consultantQuery.trim() || isConsultantLoading) return;
+        if (!consultantQuery.trim() || isConsultantLoading || !user) return;
 
-        const newMessages: ConsultantMessage[] = [...consultantMessages, { role: 'user', content: consultantQuery }];
-        setConsultantMessages(newMessages);
+        const userMessage: ConsultantMessage = { role: 'user', content: consultantQuery };
+        setConsultantMessages(prev => [...prev, userMessage]);
+        
         const currentQuery = consultantQuery;
         setConsultantQuery('');
         setIsConsultantLoading(true);
 
         try {
             const response = await startupConsultant(currentQuery);
-            setConsultantMessages(prev => [...prev, { role: 'assistant', content: response }]);
+            const assistantMessage: ConsultantMessage = { role: 'assistant', content: response };
+            setConsultantMessages(prev => [...prev, assistantMessage]);
+
+            if (db) {
+                const batch = writeBatch(db);
+                const userMsgRef = doc(collection(db, "users", user.uid, "consultantMessages"));
+                batch.set(userMsgRef, { ...userMessage, createdAt: serverTimestamp() });
+                
+                const assistantMsgRef = doc(collection(db, "users", user.uid, "consultantMessages"));
+                batch.set(assistantMsgRef, { ...assistantMessage, createdAt: serverTimestamp() });
+
+                await batch.commit();
+            }
+
         } catch (error) {
             console.error("Error with AI consultant:", error);
             const errorMessage = "I'm having trouble connecting right now. Please try again in a moment.";
@@ -187,7 +217,7 @@ export default function StartupHubPage() {
                     <Card className="flex flex-col h-[70vh]">
                         <CardHeader>
                             <CardTitle className="flex items-center gap-2"><Bot className="h-6 w-6 text-primary" /> AI Startup Consultant</CardTitle>
-                            <CardDescription>Your personal AI advisor for strategy, marketing, and growth.</CardDescription>
+                            <CardDescription>Your personal AI advisor for strategy, marketing, and growth. Your conversation history is saved.</CardDescription>
                         </CardHeader>
                         <CardContent className="flex-1 p-0">
                            <ScrollArea className="h-full w-full">
@@ -207,7 +237,7 @@ export default function StartupHubPage() {
                                         </div>
                                         {message.role === 'user' && (
                                             <Avatar className="h-8 w-8 border">
-                                                <AvatarFallback><User className="h-5 w-5 text-primary"/></AvatarFallback>
+                                                <AvatarFallback><UserIcon className="h-5 w-5 text-primary"/></AvatarFallback>
                                             </Avatar>
                                         )}
                                     </div>
