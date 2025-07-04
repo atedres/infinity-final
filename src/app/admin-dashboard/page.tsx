@@ -12,11 +12,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { BookOpen, Briefcase, Ticket } from "lucide-react";
+import { BookOpen, Briefcase, Ticket, Building2 } from "lucide-react";
 import { collection, addDoc, getDocs, doc, getDoc } from "firebase/firestore";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { db, auth } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
 
 // Types
 interface Course {
@@ -39,6 +41,13 @@ interface Ticket {
     lastUpdate: any;
 }
 
+interface Startup {
+    id: string;
+    name: string;
+    description: string;
+    website: string;
+}
+
 export default function AdminDashboardPage() {
     const { toast } = useToast();
     const router = useRouter();
@@ -47,6 +56,7 @@ export default function AdminDashboardPage() {
     const [courses, setCourses] = useState<Course[]>([]);
     const [projects, setProjects] = useState<Project[]>([]);
     const [tickets, setTickets] = useState<Ticket[]>([]);
+    const [startups, setStartups] = useState<Startup[]>([]);
 
     // Form states for new course
     const [courseTitle, setCourseTitle] = useState('');
@@ -58,6 +68,11 @@ export default function AdminDashboardPage() {
     const [projectDescription, setProjectDescription] = useState('');
     const [remuneration, setRemuneration] = useState('');
     const [skills, setSkills] = useState('');
+
+    // Form states for new startup
+    const [newStartupName, setNewStartupName] = useState('');
+    const [newStartupDescription, setNewStartupDescription] = useState('');
+    const [newStartupWebsite, setNewStartupWebsite] = useState('');
 
      useEffect(() => {
         if (!auth || !db) {
@@ -75,6 +90,7 @@ export default function AdminDashboardPage() {
                     fetchCourses();
                     fetchProjects();
                     fetchTickets();
+                    fetchStartups();
                 } else {
                     toast({ title: "Access Denied", description: "You do not have permission to view this page.", variant: "destructive" });
                     router.push('/');
@@ -131,6 +147,17 @@ export default function AdminDashboardPage() {
         }
     };
 
+    const fetchStartups = async () => {
+        if (!db) return;
+        try {
+            const querySnapshot = await getDocs(collection(db, "startups"));
+            const startupsList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Startup[];
+            setStartups(startupsList);
+        } catch (error) {
+            console.error("Error fetching startups: ", error);
+        }
+    };
+
     const handleAddCourse = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!db) return;
@@ -183,6 +210,30 @@ export default function AdminDashboardPage() {
         }
     };
 
+    const handleAddStartup = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!db) return;
+        if (!newStartupName || !newStartupDescription) {
+            toast({ title: "Error", description: "Please fill at least name and description.", variant: "destructive" });
+            return;
+        }
+        try {
+            await addDoc(collection(db, "startups"), {
+                name: newStartupName,
+                description: newStartupDescription,
+                website: newStartupWebsite,
+            });
+            toast({ title: "Success", description: "Startup added successfully." });
+            setNewStartupName('');
+            setNewStartupDescription('');
+            setNewStartupWebsite('');
+            fetchStartups(); // Refresh list
+        } catch (error) {
+            console.error("Error adding startup: ", error);
+            toast({ title: "Error", description: "Failed to add startup.", variant: "destructive" });
+        }
+    };
+
     if (isLoading) {
         return <SubpageLayout title="Admin Dashboard"><div className="flex justify-center items-center h-full"><p>Verifying access...</p></div></SubpageLayout>;
     }
@@ -195,7 +246,11 @@ export default function AdminDashboardPage() {
     return (
         <SubpageLayout title="Admin Dashboard">
             <Tabs defaultValue="courses" className="w-full">
-                <TabsList className="grid w-full grid-cols-1 sm:grid-cols-3">
+                <TabsList className="grid w-full grid-cols-1 sm:grid-cols-4">
+                     <TabsTrigger value="startups">
+                        <Building2 className="mr-2 h-4 w-4" />
+                        Manage Startups
+                    </TabsTrigger>
                     <TabsTrigger value="courses">
                         <BookOpen className="mr-2 h-4 w-4" />
                         Manage Courses
@@ -209,6 +264,58 @@ export default function AdminDashboardPage() {
                         View Tickets
                     </TabsTrigger>
                 </TabsList>
+
+                {/* Manage Startups Tab */}
+                <TabsContent value="startups" className="mt-6 space-y-6">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Add New Startup</CardTitle>
+                            <CardDescription>Add a new startup to the Infinity Hub ecosystem.</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <form onSubmit={handleAddStartup} className="space-y-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="startup-new-name">Startup Name</Label>
+                                    <Input id="startup-new-name" placeholder="e.g., QuantumLeap" value={newStartupName} onChange={(e) => setNewStartupName(e.target.value)} />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="startup-new-desc">Description</Label>
+                                    <Textarea id="startup-new-desc" placeholder="What does this startup do?" value={newStartupDescription} onChange={(e) => setNewStartupDescription(e.target.value)} />
+                                </div>
+                                 <div className="space-y-2">
+                                    <Label htmlFor="startup-new-website">Website</Label>
+                                    <Input id="startup-new-website" placeholder="https://quantumleap.ai" value={newStartupWebsite} onChange={(e) => setNewStartupWebsite(e.target.value)} />
+                                </div>
+                                <Button type="submit">Add Startup</Button>
+                            </form>
+                        </CardContent>
+                    </Card>
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Existing Startups</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Name</TableHead>
+                                        <TableHead>Description</TableHead>
+                                        <TableHead>Website</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {startups.map((startup) => (
+                                        <TableRow key={startup.id}>
+                                            <TableCell className="font-medium">{startup.name}</TableCell>
+                                            <TableCell>{startup.description}</TableCell>
+                                             <TableCell><a href={startup.website} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{startup.website}</a></TableCell>
+                                        </TableRow>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
 
                 {/* Manage Courses Tab */}
                 <TabsContent value="courses" className="mt-6 space-y-6">
@@ -272,7 +379,18 @@ export default function AdminDashboardPage() {
                                     </div>
                                     <div className="space-y-2">
                                         <Label htmlFor="startup-name">Startup Name</Label>
-                                        <Input id="startup-name" placeholder="e.g., InnovateAI" value={startupName} onChange={(e) => setStartupName(e.target.value)} />
+                                        <Select onValueChange={setStartupName} value={startupName}>
+                                            <SelectTrigger id="startup-name">
+                                                <SelectValue placeholder="Select a startup" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {startups.map(startup => (
+                                                    <SelectItem key={startup.id} value={startup.name}>
+                                                        {startup.name}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
                                     </div>
                                 </div>
                                  <div className="space-y-2">
