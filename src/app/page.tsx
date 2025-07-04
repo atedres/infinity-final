@@ -1,3 +1,4 @@
+
 "use client";
 
 import {
@@ -7,6 +8,7 @@ import {
   Building,
   Infinity as InfinityIcon,
   Quote,
+  LayoutDashboard,
 } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -25,11 +27,11 @@ import {
 
 const features = [
   {
-    icon: <Rocket className="h-8 w-8 text-primary" />,
-    title: 'Milestone',
-    description: 'A dedicated space for our invested startups to monitor project development and access educational courses.',
-    href: '/milestone',
-    cta: 'View Dashboard',
+    icon: <LayoutDashboard className="h-8 w-8 text-primary" />,
+    title: 'Startup Hub',
+    description: 'A dedicated space for our invested startups to monitor project development and access an AI business consultant.',
+    href: '/startup-hub',
+    cta: 'Enter Hub',
   },
   {
     icon: <Briefcase className="h-8 w-8 text-primary" />,
@@ -70,7 +72,7 @@ const testimonials = [
         dataAiHint: "professional portrait"
     },
     {
-        quote: "The educational resources in the Milestone dashboard have been invaluable for our startup's growth. Highly recommended!",
+        quote: "The AI consultant in the Startup Hub gave us the strategic direction we desperately needed. A game-changer!",
         author: "Emily White",
         role: "Founder, ConnectSphere",
         avatar: "https://placehold.co/48x48.png",
