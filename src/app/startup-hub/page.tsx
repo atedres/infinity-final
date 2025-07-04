@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
@@ -32,6 +33,7 @@ interface Course {
     id: string;
     title: string;
     description: string;
+    videoUrl?: string;
 }
 
 interface Startup {
@@ -43,6 +45,27 @@ interface ConsultantMessage {
     role: 'user' | 'assistant';
     content: string;
 }
+
+const getEmbedUrl = (url: string) => {
+    let embedUrl = '';
+    try {
+        const urlObj = new URL(url);
+        if (urlObj.hostname.includes('youtube.com')) {
+            const videoId = urlObj.searchParams.get('v');
+            if (videoId) embedUrl = `https://www.youtube.com/embed/${videoId}`;
+        } else if (urlObj.hostname.includes('youtu.be')) {
+            const videoId = urlObj.pathname.slice(1);
+            if (videoId) embedUrl = `https://www.youtube.com/embed/${videoId}`;
+        } else if (urlObj.hostname.includes('vimeo.com')) {
+            const videoId = urlObj.pathname.split('/').pop();
+            if (videoId) embedUrl = `https://player.vimeo.com/video/${videoId}`;
+        }
+    } catch (error) {
+        console.error("Invalid URL for embedding", error);
+        return null;
+    }
+    return embedUrl;
+};
 
 export default function StartupHubPage() {
     const { toast } = useToast();
@@ -204,12 +227,31 @@ export default function StartupHubPage() {
                 <TabsContent value="courses" className="mt-6">
                     <h2 className="text-2xl font-headline font-semibold tracking-tight mb-4">Startup Courses</h2>
                     <div className="grid gap-6 md:grid-cols-3">
-                        {courses.map(course => (
-                             <Card key={course.id}>
-                                <CardHeader><CardTitle className="flex items-center gap-2"><BookOpen className="h-5 w-5 text-primary"/>{course.title}</CardTitle></CardHeader>
-                                <CardContent><p className="text-sm text-muted-foreground">{course.description}</p></CardContent>
-                            </Card>
-                        ))}
+                        {courses.map(course => {
+                            const embedUrl = course.videoUrl ? getEmbedUrl(course.videoUrl) : null;
+                            return (
+                                <Card key={course.id}>
+                                    {embedUrl && (
+                                        <div className="aspect-video w-full overflow-hidden rounded-t-lg">
+                                            <iframe
+                                                src={embedUrl}
+                                                title={course.title}
+                                                frameBorder="0"
+                                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                                allowFullScreen
+                                                className="w-full h-full"
+                                            ></iframe>
+                                        </div>
+                                    )}
+                                    <CardHeader className={!embedUrl ? "" : "pt-6"}>
+                                        <CardTitle className="flex items-center gap-2"><BookOpen className="h-5 w-5 text-primary"/>{course.title}</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <p className="text-sm text-muted-foreground">{course.description}</p>
+                                    </CardContent>
+                                </Card>
+                            );
+                        })}
                     </div>
                 </TabsContent>
 

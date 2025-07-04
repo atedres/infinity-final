@@ -25,6 +25,7 @@ interface Course {
     id: string;
     title: string;
     description: string;
+    videoUrl?: string;
 }
 
 interface Project {
@@ -79,6 +80,7 @@ export default function AdminDashboardPage() {
     // Form states
     const [courseTitle, setCourseTitle] = useState('');
     const [courseDescription, setCourseDescription] = useState('');
+    const [courseVideoUrl, setCourseVideoUrl] = useState('');
     const [projectTitle, setProjectTitle] = useState('');
     const [startupName, setStartupName] = useState('');
     const [projectDescription, setProjectDescription] = useState('');
@@ -168,9 +170,9 @@ export default function AdminDashboardPage() {
     const handleAddCourse = async (e: React.FormEvent) => {
         e.preventDefault(); if (!db) return;
         try {
-            await addDoc(collection(db, "courses"), { title: courseTitle, description: courseDescription });
+            await addDoc(collection(db, "courses"), { title: courseTitle, description: courseDescription, videoUrl: courseVideoUrl });
             toast({ title: "Course added successfully." });
-            setCourseTitle(''); setCourseDescription(''); fetchCourses();
+            setCourseTitle(''); setCourseDescription(''); setCourseVideoUrl(''); fetchCourses();
         } catch (error) { toast({ title: "Failed to add course.", variant: "destructive" }); }
     };
 
@@ -344,12 +346,13 @@ export default function AdminDashboardPage() {
                         <CardContent><form onSubmit={handleAddCourse} className="space-y-4">
                             <div className="space-y-2"><Label htmlFor="course-title">Course Title</Label><Input id="course-title" placeholder="e.g., Advanced Marketing" value={courseTitle} onChange={(e) => setCourseTitle(e.target.value)} /></div>
                             <div className="space-y-2"><Label htmlFor="course-description">Description</Label><Textarea id="course-description" placeholder="A brief summary of the course content." value={courseDescription} onChange={(e) => setCourseDescription(e.target.value)} /></div>
+                            <div className="space-y-2"><Label htmlFor="course-video-url">Video URL (optional)</Label><Input id="course-video-url" placeholder="e.g., https://www.youtube.com/watch?v=..." value={courseVideoUrl} onChange={(e) => setCourseVideoUrl(e.target.value)} /></div>
                             <Button type="submit">Upload Course</Button>
                         </form></CardContent>
                     </Card>
                     <Card>
                         <CardHeader><CardTitle>Existing Courses</CardTitle></CardHeader>
-                        <CardContent><Table><TableHeader><TableRow><TableHead>Title</TableHead><TableHead>Description</TableHead></TableRow></TableHeader><TableBody>{courses.map((course) => (<TableRow key={course.id}><TableCell className="font-medium">{course.title}</TableCell><TableCell>{course.description}</TableCell></TableRow>))}</TableBody></Table></CardContent>
+                        <CardContent><Table><TableHeader><TableRow><TableHead>Title</TableHead><TableHead>Description</TableHead><TableHead>Video</TableHead></TableRow></TableHeader><TableBody>{courses.map((course) => (<TableRow key={course.id}><TableCell className="font-medium">{course.title}</TableCell><TableCell>{course.description}</TableCell><TableCell>{course.videoUrl ? <a href={course.videoUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">View Video</a> : 'N/A'}</TableCell></TableRow>))}</TableBody></Table></CardContent>
                     </Card>
                 </TabsContent>
 
