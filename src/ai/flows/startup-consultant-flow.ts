@@ -8,18 +8,18 @@
 import {ai} from '@/ai/genkit';
 import {z} from 'zod';
 
-const StartupConsultantInputSchema = z
-  .string()
-  .describe('A question for the startup consultant.');
+const StartupConsultantInputSchema = z.object({
+  prompt: z.string().describe('A question for the startup consultant.'),
+});
 
 const StartupConsultantOutputSchema = z
   .string()
   .describe('The expert advice from the consultant.');
 
 export async function startupConsultant(
-  prompt: z.infer<typeof StartupConsultantInputSchema>
-): Promise<z.infer<typeof StartupConsultantOutputSchema>> {
-  return startupConsultantFlow(prompt);
+  prompt: string
+): Promise<string> {
+  return startupConsultantFlow({ prompt });
 }
 
 const consultantPrompt = ai.definePrompt({
@@ -41,8 +41,8 @@ const startupConsultantFlow = ai.defineFlow(
     inputSchema: StartupConsultantInputSchema,
     outputSchema: StartupConsultantOutputSchema,
   },
-  async (prompt) => {
-    const {output} = await consultantPrompt(prompt);
+  async (input) => {
+    const {output} = await consultantPrompt(input);
     // Ensure we always return a string to match the schema, even if the model returns null.
     return output || "I'm sorry, I couldn't generate a response for that. Could you please try rephrasing your question?";
   }
