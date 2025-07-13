@@ -22,6 +22,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { initializeApp, deleteApp, getApp, getApps } from "firebase/app";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 
 // Types
@@ -421,35 +422,37 @@ export default function AdminDashboardPage() {
                 </DialogContent>
             </Dialog>
             <Dialog open={isEditStartupDialogOpen} onOpenChange={setIsEditStartupDialogOpen}>
-                 <DialogContent>
+                 <DialogContent className="sm:max-w-[425px]">
                     <DialogHeader>
                         <DialogTitle>Edit Startup Information</DialogTitle>
                         <DialogDescription>
                             Update the details for {startupToEdit?.name}.
                         </DialogDescription>
                     </DialogHeader>
-                    <form onSubmit={handleEditStartup}>
-                        <div className="grid gap-4 py-4">
-                            <div className="space-y-2">
-                                <Label htmlFor="edit-startup-name">Startup Name</Label>
-                                <Input id="edit-startup-name" value={editedStartupName} onChange={(e) => setEditedStartupName(e.target.value)} required />
+                     <ScrollArea className="max-h-[70vh] pr-6">
+                        <form onSubmit={handleEditStartup}>
+                            <div className="grid gap-4 py-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="edit-startup-name">Startup Name</Label>
+                                    <Input id="edit-startup-name" value={editedStartupName} onChange={(e) => setEditedStartupName(e.target.value)} required />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="edit-startup-members">Number of Members</Label>
+                                    <Input id="edit-startup-members" type="number" value={editedStartupMembers} onChange={(e) => setEditedStartupMembers(parseInt(e.target.value, 10))} min="1" required />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="edit-founder-email">Founder's Email</Label>
+                                    <Input id="edit-founder-email" type="email" value={editedFounderEmail} onChange={(e) => setEditedFounderEmail(e.target.value)} required />
+                                </div>
                             </div>
-                             <div className="space-y-2">
-                                <Label htmlFor="edit-startup-members">Number of Members</Label>
-                                <Input id="edit-startup-members" type="number" value={editedStartupMembers} onChange={(e) => setEditedStartupMembers(parseInt(e.target.value, 10))} min="1" required />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="edit-founder-email">Founder's Email</Label>
-                                <Input id="edit-founder-email" type="email" value={editedFounderEmail} onChange={(e) => setEditedFounderEmail(e.target.value)} required />
-                            </div>
-                        </div>
-                        <DialogFooter>
-                            <DialogClose asChild>
-                                <Button type="button" variant="outline">Cancel</Button>
-                            </DialogClose>
-                            <Button type="submit">Save Changes</Button>
-                        </DialogFooter>
-                    </form>
+                            <DialogFooter>
+                                <DialogClose asChild>
+                                    <Button type="button" variant="outline">Cancel</Button>
+                                </DialogClose>
+                                <Button type="submit">Save Changes</Button>
+                            </DialogFooter>
+                        </form>
+                     </ScrollArea>
                 </DialogContent>
             </Dialog>
             <Tabs defaultValue="startups" className="w-full">
@@ -570,5 +573,7 @@ export default function AdminDashboardPage() {
         </SubpageLayout>
     );
 }
+
+    
 
     
