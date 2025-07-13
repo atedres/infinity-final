@@ -194,15 +194,16 @@ export default function AdminDashboardPage() {
 
         const tempPassword = generateTempPassword();
 
-        try {
-            // Step 1: Create a new startup document to get its ID
-            const startupRef = doc(collection(db, "startups"));
-            
-            // Step 2: Create user in Firebase Auth
-            const userCredential = await createUserWithEmailAndPassword(auth, newFounderEmail, tempPassword);
-            const user = userCredential.user;
+        // Step 1: Create a new startup document ref to get its ID
+        const startupRef = doc(collection(db, "startups"));
+        let user: any;
 
-            // Step 3: Create user document in Firestore
+        try {
+            // Step 2: Try to create user in Firebase Auth
+            const userCredential = await createUserWithEmailAndPassword(auth, newFounderEmail, tempPassword);
+            user = userCredential.user;
+
+            // Step 3: Create user document in Firestore for new user
             await setDoc(doc(db, "users", user.uid), {
                 uid: user.uid,
                 email: newFounderEmail,
@@ -212,6 +213,45 @@ export default function AdminDashboardPage() {
                 startupId: startupRef.id,
             });
 
+            // Show temporary credentials dialog
+            setNewCredentials({ email: newFounderEmail, password: tempPassword });
+
+        } catch (error: any) {
+             console.error("Error creating auth user:", error);
+             if (error.code === 'auth/email-already-in-use') {
+                // Find the existing user and link them
+                const usersRef = collection(db, "users");
+                const q = query(usersRef, where("email", "==", newFounderEmail));
+                const querySnapshot = await getDocs(q);
+
+                if (!querySnapshot.empty) {
+                    const existingUserDoc = querySnapshot.docs[0];
+                    user = { uid: existingUserDoc.id, email: newFounderEmail };
+                    
+                    // Update existing user doc with new startupId
+                    await updateDoc(doc(db, "users", user.uid), {
+                        startupId: startupRef.id
+                    });
+
+                    toast({
+                        title: "Existing User Linked",
+                        description: `User with email ${newFounderEmail} has been linked to the new startup.`,
+                    });
+                } else {
+                     toast({ title: "Creation Failed", description: "Email is in use but no user document found. Please contact support.", variant: "destructive" });
+                     return;
+                }
+             } else {
+                let description = 'Could not create the auth user. Please check the details and try again.';
+                 if (error.code === 'auth/invalid-email') {
+                    description = 'The email address is not valid.';
+                 }
+                 toast({ title: "Creation Failed", description, variant: "destructive" });
+                 return; // Stop execution if auth creation fails for other reasons
+             }
+        }
+        
+        try {
             // Step 4: Now set the startup document data
             await setDoc(startupRef, {
                 name: newStartupName,
@@ -220,26 +260,17 @@ export default function AdminDashboardPage() {
                 members: newStartupMembers,
             });
 
-            toast({ title: "Startup & Founder Account Created", description: `${newStartupName} has been added.` });
+            toast({ title: "Startup Created", description: `${newStartupName} has been added successfully.` });
             
             // Reset form and close dialog
             setNewStartupName(''); setNewFounderFirstName(''); setNewFounderLastName(''); setNewFounderEmail(''); setNewStartupMembers(1);
             setIsAddStartupDialogOpen(false);
             
-            // Show credentials dialog
-            setNewCredentials({ email: newFounderEmail, password: tempPassword });
-            
             fetchStartups();
 
-        } catch (error: any) {
-             console.error("Error creating startup:", error);
-             let description = 'Could not create the startup. Please check the details and try again.';
-             if (error.code === 'auth/email-already-in-use') {
-                 description = 'This email is already in use by another account.';
-             } else if (error.code === 'auth/invalid-email') {
-                description = 'The email address is not valid.';
-             }
-             toast({ title: "Creation Failed", description, variant: "destructive" });
+        } catch (startupError) {
+            console.error("Error creating startup document:", startupError);
+            toast({ title: "Creation Failed", description: "Failed to create the startup profile in the database.", variant: "destructive" });
         }
     };
 
@@ -277,7 +308,7 @@ export default function AdminDashboardPage() {
             <AlertDialog open={!!newCredentials} onOpenChange={(open) => !open && setNewCredentials(null)}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle>Startup Account Created!</AlertDialogTitle>
+                        <AlertDialogTitle>New Founder Account Created!</AlertDialogTitle>
                         <AlertDialogDescription>Please securely share these temporary credentials with the founder. They will be prompted to change their password on first login.</AlertDialogDescription>
                     </AlertDialogHeader>
                     <div className="my-4 space-y-2 rounded-lg border bg-muted p-4">
@@ -294,7 +325,7 @@ export default function AdminDashboardPage() {
                     <DialogHeader>
                         <DialogTitle>Add New Startup</DialogTitle>
                         <DialogDescription>
-                            Create a new startup and its primary founder account.
+                            Create a new startup and its primary founder account. If the email exists, the user will be linked.
                         </DialogDescription>
                     </DialogHeader>
                     <form onSubmit={handleAddStartup}>
@@ -432,4 +463,5 @@ export default function AdminDashboardPage() {
     );
 }
 
+    
     
