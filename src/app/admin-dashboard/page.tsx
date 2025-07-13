@@ -288,27 +288,34 @@ export default function AdminDashboardPage() {
     const handleEditStartup = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!db || !startupToEdit) return;
+    
         try {
-            const batch = writeBatch(db);
             const startupRef = doc(db, "startups", startupToEdit.id);
             const userRef = doc(db, "users", startupToEdit.founderId);
-
+            const batch = writeBatch(db);
+    
+            // Update startup document
             batch.update(startupRef, {
                 name: editedStartupName,
                 members: editedStartupMembers,
-                founderEmail: editedFounderEmail,
             });
-
-            batch.update(userRef, {
-                email: editedFounderEmail,
-            });
-
+    
+            // Update user document if email has changed in the form
+            // NOTE: This does NOT change the auth email, only the record in firestore.
+            if (editedFounderEmail !== startupToEdit.founderEmail) {
+                 batch.update(startupRef, { founderEmail: editedFounderEmail });
+                 batch.update(userRef, { email: editedFounderEmail });
+                 toast({ title: "Email Record Updated", description: "Founder's email record updated in database. Auth email not changed.", variant: "default" });
+            }
+    
             await batch.commit();
-
-            toast({ title: "Startup Updated", description: "Information has been saved." });
+    
+            toast({ title: "Startup Updated", description: "Information has been saved successfully." });
             fetchStartups();
+    
         } catch (error) {
-            toast({ title: "Update Failed", description: "Could not save changes. Note: Changing an email via the SDK requires a special server-side setup not yet implemented.", variant: "destructive" });
+            console.error("Error updating startup:", error);
+            toast({ title: "Update Failed", description: "Could not save changes.", variant: "destructive" });
         } finally {
             setIsEditStartupDialogOpen(false);
             setStartupToEdit(null);
