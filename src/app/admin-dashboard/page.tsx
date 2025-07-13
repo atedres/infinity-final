@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { BookOpen, Briefcase, Ticket, Building2, UserCog, Trash2, PlusCircle, User, Users, MoreVertical, Edit, KeyRound, Copy } from "lucide-react";
+import { BookOpen, Briefcase, Ticket, Building2, UserCog, Trash2, PlusCircle, User, Users, MoreVertical, Edit, KeyRound, Copy, Link as LinkIcon } from "lucide-react";
 import { collection, addDoc, getDocs, doc, getDoc, updateDoc, deleteDoc, where, query, setDoc, writeBatch } from "firebase/firestore";
 import { onAuthStateChanged, createUserWithEmailAndPassword, updatePassword, getAuth, sendPasswordResetEmail, deleteUser } from "firebase/auth";
 import { db, auth } from "@/lib/firebase";
@@ -83,7 +83,7 @@ export default function AdminDashboardPage() {
     const [startupToReset, setStartupToReset] = useState<Startup | null>(null);
     const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
     const [isResetAlertOpen, setIsResetAlertOpen] = useState(false);
-    const [newCredentials, setNewCredentials] = useState<{email: string, password: string} | null>(null);
+    const [newCredentials, setNewCredentials] = useState<{email: string, password: string, url: string} | null>(null);
 
     // Form states
     const [courseTitle, setCourseTitle] = useState('');
@@ -249,7 +249,8 @@ export default function AdminDashboardPage() {
 
             await batch.commit();
     
-            setNewCredentials({ email: newFounderEmail, password: tempPassword });
+            const startupUrl = `${window.location.origin}/startup-hub`;
+            setNewCredentials({ email: newFounderEmail, password: tempPassword, url: startupUrl });
             toast({ title: "Startup Created", description: `${newStartupName} has been added successfully.` });
     
             setNewStartupName('');
@@ -376,7 +377,8 @@ export default function AdminDashboardPage() {
                  throw new Error("Original user document not found. Aborting password reset.");
             }
             
-            setNewCredentials({ email: founderEmail, password: tempPassword });
+            const startupUrl = `${window.location.origin}/startup-hub`;
+            setNewCredentials({ email: founderEmail, password: tempPassword, url: startupUrl });
             toast({ title: "Success!", description: `New password generated for ${founderName}.` });
             fetchStartups(); // Refresh the list to get the new founderId
 
@@ -409,14 +411,14 @@ export default function AdminDashboardPage() {
         }
     };
 
-    const handleCopyPassword = () => {
-        if (newCredentials?.password) {
-            navigator.clipboard.writeText(newCredentials.password)
+    const handleCopy = (textToCopy: string, successMessage: string) => {
+        if (textToCopy) {
+            navigator.clipboard.writeText(textToCopy)
                 .then(() => {
-                    toast({ title: "Copied!", description: "Password copied to clipboard." });
+                    toast({ title: "Copied!", description: successMessage });
                 })
                 .catch(err => {
-                    toast({ title: "Error", description: "Could not copy password.", variant: "destructive" });
+                    toast({ title: "Error", description: "Could not copy text.", variant: "destructive" });
                 });
         }
     };
@@ -458,11 +460,17 @@ export default function AdminDashboardPage() {
                         <AlertDialogTitle>Founder Account Credentials</AlertDialogTitle>
                         <AlertDialogDescription>Please securely share these credentials with the founder. They will be prompted to change their password on first login.</AlertDialogDescription>
                     </AlertDialogHeader>
-                    <div className="my-4 space-y-2 rounded-lg border bg-muted p-4">
+                    <div className="my-4 space-y-4 rounded-lg border bg-muted p-4">
+                        <div className="flex items-center justify-between">
+                            <p className="text-sm"><strong>Login URL:</strong> <span className="font-mono bg-background p-1 rounded break-all">{newCredentials?.url}</span></p>
+                             <Button variant="ghost" size="icon" onClick={() => handleCopy(newCredentials?.url || '', 'Login URL copied to clipboard.')}>
+                                <LinkIcon className="h-4 w-4" />
+                            </Button>
+                        </div>
                         <p className="text-sm"><strong>Email:</strong> {newCredentials?.email}</p>
                         <div className="flex items-center justify-between">
-                            <p className="text-sm"><strong>Temporary Password:</strong> <span className="font-mono bg-background p-1 rounded">{newCredentials?.password}</span></p>
-                            <Button variant="ghost" size="icon" onClick={handleCopyPassword}>
+                            <p className="text-sm"><strong>Temp Password:</strong> <span className="font-mono bg-background p-1 rounded">{newCredentials?.password}</span></p>
+                            <Button variant="ghost" size="icon" onClick={() => handleCopy(newCredentials?.password || '', 'Password copied to clipboard.')}>
                                 <Copy className="h-4 w-4" />
                             </Button>
                         </div>
@@ -666,5 +674,6 @@ export default function AdminDashboardPage() {
     
 
     
+
 
 
