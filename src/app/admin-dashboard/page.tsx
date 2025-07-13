@@ -12,13 +12,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { BookOpen, Briefcase, Ticket, Building2, UserCog, Trash2 } from "lucide-react";
-import { collection, addDoc, getDocs, doc, getDoc, updateDoc, deleteDoc, where, query } from "firebase/firestore";
-import { onAuthStateChanged } from "firebase/auth";
+import { BookOpen, Briefcase, Ticket, Building2, UserCog, Trash2, PlusCircle, User, Users } from "lucide-react";
+import { collection, addDoc, getDocs, doc, getDoc, updateDoc, deleteDoc, where, query, setDoc } from "firebase/firestore";
+import { onAuthStateChanged, createUserWithEmailAndPassword } from "firebase/auth";
 import { db, auth } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
 // Types
 interface Course {
@@ -45,8 +46,9 @@ interface Ticket {
 interface Startup {
     id: string;
     name: string;
-    description: string;
-    website: string;
+    founderName: string;
+    founderEmail: string;
+    members: number;
 }
 
 interface User {
@@ -72,10 +74,9 @@ export default function AdminDashboardPage() {
     const [projects, setProjects] = useState<Project[]>([]);
     const [tickets, setTickets] = useState<Ticket[]>([]);
     const [startups, setStartups] = useState<Startup[]>([]);
-    const [users, setUsers] = useState<User[]>([]);
-    const [startupUsers, setStartupUsers] = useState<StartupUser[]>([]);
     const [startupToDelete, setStartupToDelete] = useState<Startup | null>(null);
     const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
+    const [newCredentials, setNewCredentials] = useState<{email: string, password: string} | null>(null);
 
     // Form states
     const [courseTitle, setCourseTitle] = useState('');
@@ -86,11 +87,12 @@ export default function AdminDashboardPage() {
     const [projectDescription, setProjectDescription] = useState('');
     const [remuneration, setRemuneration] = useState('');
     const [skills, setSkills] = useState('');
+    const [isAddStartupDialogOpen, setIsAddStartupDialogOpen] = useState(false);
     const [newStartupName, setNewStartupName] = useState('');
-    const [newStartupDescription, setNewStartupDescription] = useState('');
-    const [newStartupWebsite, setNewStartupWebsite] = useState('');
-    const [selectedUser, setSelectedUser] = useState('');
-    const [selectedStartup, setSelectedStartup] = useState('');
+    const [newFounderFirstName, setNewFounderFirstName] = useState('');
+    const [newFounderLastName, setNewFounderLastName] = useState('');
+    const [newFounderEmail, setNewFounderEmail] = useState('');
+    const [newStartupMembers, setNewStartupMembers] = useState(1);
 
      useEffect(() => {
         if (!auth || !db) { router.push('/'); return; }
@@ -120,8 +122,6 @@ export default function AdminDashboardPage() {
         fetchProjects();
         fetchTickets();
         fetchStartups();
-        fetchUsers();
-        fetchStartupUsers();
     };
 
     const fetchGeneric = async <T>(collectionName: string, setter: React.Dispatch<React.SetStateAction<T[]>>) => {
@@ -136,7 +136,6 @@ export default function AdminDashboardPage() {
     const fetchCourses = () => fetchGeneric<Course>("courses", setCourses);
     const fetchProjects = () => fetchGeneric<Project>("projects", setProjects);
     const fetchStartups = () => fetchGeneric<Startup>("startups", setStartups);
-    const fetchUsers = () => fetchGeneric<User>("users", setUsers);
     
     const fetchTickets = async () => {
         if (!db) return;
@@ -145,26 +144,6 @@ export default function AdminDashboardPage() {
             const ticketsList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), lastUpdate: doc.data().lastUpdate?.toDate ? doc.data().lastUpdate.toDate().toLocaleDateString() : 'N/A' })) as Ticket[];
             setTickets(ticketsList);
         } catch (error) { console.error("Error fetching tickets: ", error); }
-    };
-
-    const fetchStartupUsers = async () => {
-        if (!db) return;
-        try {
-            const q = query(collection(db, "users"), where("startupId", "!=", ""));
-            const querySnapshot = await getDocs(q);
-            const usersList = await Promise.all(querySnapshot.docs.map(async (userDoc) => {
-                const userData = userDoc.data();
-                let startupName = 'Unknown';
-                if (userData.startupId) {
-                    const startupDoc = await getDoc(doc(db, "startups", userData.startupId));
-                    if (startupDoc.exists()) {
-                        startupName = startupDoc.data().name;
-                    }
-                }
-                return { ...userData, id: userDoc.id, startupName } as StartupUser;
-            }));
-            setStartupUsers(usersList);
-        } catch (error) { console.error("Error fetching startup users: ", error); }
     };
     
     const handleAddCourse = async (e: React.FormEvent) => {
@@ -206,14 +185,62 @@ export default function AdminDashboardPage() {
             toast({ title: "Failed to add project.", variant: "destructive" }); 
         }
     };
+    
+    const generateTempPassword = () => Math.random().toString(36).slice(-8);
 
     const handleAddStartup = async (e: React.FormEvent) => {
-        e.preventDefault(); if (!db) return;
+        e.preventDefault();
+        if (!auth || !db) return;
+
+        const tempPassword = generateTempPassword();
+
         try {
-            await addDoc(collection(db, "startups"), { name: newStartupName, description: newStartupDescription, website: newStartupWebsite });
-            toast({ title: "Startup added successfully." });
-            setNewStartupName(''); setNewStartupDescription(''); setNewStartupWebsite(''); fetchStartups();
-        } catch (error) { toast({ title: "Failed to add startup.", variant: "destructive" }); }
+            // Step 1: Create a new startup document to get its ID
+            const startupRef = doc(collection(db, "startups"));
+            
+            // Step 2: Create user in Firebase Auth
+            const userCredential = await createUserWithEmailAndPassword(auth, newFounderEmail, tempPassword);
+            const user = userCredential.user;
+
+            // Step 3: Create user document in Firestore
+            await setDoc(doc(db, "users", user.uid), {
+                uid: user.uid,
+                email: newFounderEmail,
+                firstName: newFounderFirstName,
+                lastName: newFounderLastName,
+                role: 'Startup Founder',
+                startupId: startupRef.id,
+            });
+
+            // Step 4: Now set the startup document data
+            await setDoc(startupRef, {
+                name: newStartupName,
+                founderName: `${newFounderFirstName} ${newFounderLastName}`,
+                founderEmail: newFounderEmail,
+                members: newStartupMembers,
+            });
+
+            toast({ title: "Startup & Founder Account Created", description: `${newStartupName} has been added.` });
+            
+            // Reset form and close dialog
+            setNewStartupName(''); setNewFounderFirstName(''); setNewFounderLastName(''); setNewFounderEmail(''); setNewStartupMembers(1);
+            setIsAddStartupDialogOpen(false);
+            
+            // Show credentials dialog
+            setNewCredentials({ email: newFounderEmail, password: tempPassword });
+            
+            fetchStartups();
+
+        } catch (error: any) {
+             console.error("Error creating startup:", error);
+             let description = 'Could not create the startup. Please check the details and try again.';
+             if (error.code === 'auth/email-already-in-use') {
+                 description = 'This email is already in use by another account.';
+             } else if (error.code === 'auth/invalid-email') {
+                description = 'The email address is not valid.';
+             }
+             toast({ title: "Creation Failed", description, variant: "destructive" });
+        }
     };
 
     const handleDeleteStartup = async () => {
@@ -230,37 +257,6 @@ export default function AdminDashboardPage() {
         }
     };
     
-    const handleAssignUser = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!db || !selectedUser || !selectedStartup) {
-            toast({ title: "Error", description: "Please select a user and a startup.", variant: "destructive" });
-            return;
-        }
-        try {
-            const userDocRef = doc(db, "users", selectedUser);
-            await updateDoc(userDocRef, { startupId: selectedStartup });
-            toast({ title: "User Assigned", description: "User has been granted access to the startup hub." });
-            setSelectedUser('');
-            setSelectedStartup('');
-            fetchStartupUsers();
-        } catch (error) {
-            toast({ title: "Assignment Failed", description: "Could not assign user to startup.", variant: "destructive" });
-        }
-    };
-
-    const handleRevokeAccess = async (userId: string) => {
-        if (!db) return;
-        try {
-            const userDocRef = doc(db, "users", userId);
-            await updateDoc(userDocRef, { startupId: "" });
-            toast({ title: "Access Revoked", description: "User access has been revoked." });
-            fetchStartupUsers();
-        } catch (error) {
-            toast({ title: "Error", description: "Could not revoke user access.", variant: "destructive" });
-        }
-    };
-
-
     if (isLoading) return <SubpageLayout title="Admin Dashboard"><div className="flex justify-center items-center h-full"><p>Verifying access...</p></div></SubpageLayout>;
     if (!isAuthorized) return null;
 
@@ -278,10 +274,66 @@ export default function AdminDashboardPage() {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+            <AlertDialog open={!!newCredentials} onOpenChange={(open) => !open && setNewCredentials(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Startup Account Created!</AlertDialogTitle>
+                        <AlertDialogDescription>Please securely share these temporary credentials with the founder. They will be prompted to change their password on first login.</AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <div className="my-4 space-y-2 rounded-lg border bg-muted p-4">
+                        <p className="text-sm"><strong>Email:</strong> {newCredentials?.email}</p>
+                        <p className="text-sm"><strong>Temporary Password:</strong> <span className="font-mono bg-background p-1 rounded">{newCredentials?.password}</span></p>
+                    </div>
+                    <AlertDialogFooter>
+                        <AlertDialogAction onClick={() => setNewCredentials(null)}>Close</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+            <Dialog open={isAddStartupDialogOpen} onOpenChange={setIsAddStartupDialogOpen}>
+                 <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Add New Startup</DialogTitle>
+                        <DialogDescription>
+                            Create a new startup and its primary founder account.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={handleAddStartup}>
+                        <div className="grid gap-4 py-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="startup-name">Startup Name</Label>
+                                <Input id="startup-name" value={newStartupName} onChange={(e) => setNewStartupName(e.target.value)} placeholder="e.g., QuantumLeap AI" required />
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="founder-first-name">Founder's First Name</Label>
+                                    <Input id="founder-first-name" value={newFounderFirstName} onChange={(e) => setNewFounderFirstName(e.target.value)} required />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="founder-last-name">Founder's Last Name</Label>
+                                    <Input id="founder-last-name" value={newFounderLastName} onChange={(e) => setNewFounderLastName(e.target.value)} required />
+                                </div>
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="founder-email">Founder's Email</Label>
+                                <Input id="founder-email" type="email" value={newFounderEmail} onChange={(e) => setNewFounderEmail(e.target.value)} required />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="startup-members">Number of Members</Label>
+                                <Input id="startup-members" type="number" value={newStartupMembers} onChange={(e) => setNewStartupMembers(parseInt(e.target.value, 10))} min="1" required />
+                            </div>
+                        </div>
+                        <DialogFooter>
+                            <DialogClose asChild>
+                                <Button type="button" variant="outline">Cancel</Button>
+                            </DialogClose>
+                            <Button type="submit">Create Startup</Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
             <Tabs defaultValue="startups" className="w-full">
-                <TabsList className="grid w-full grid-cols-1 sm:grid-cols-5">
+                <TabsList className="grid w-full grid-cols-1 sm:grid-cols-4">
                      <TabsTrigger value="startups"><Building2 className="mr-2 h-4 w-4" />Manage Startups</TabsTrigger>
-                     <TabsTrigger value="startup-users"><UserCog className="mr-2 h-4 w-4" />Startup Users</TabsTrigger>
                     <TabsTrigger value="courses"><BookOpen className="mr-2 h-4 w-4" />Manage Courses</TabsTrigger>
                     <TabsTrigger value="projects"><Briefcase className="mr-2 h-4 w-4" />Manage Projects</TabsTrigger>
                     <TabsTrigger value="tickets"><Ticket className="mr-2 h-4 w-4" />View Tickets</TabsTrigger>
@@ -289,26 +341,34 @@ export default function AdminDashboardPage() {
 
                 <TabsContent value="startups" className="mt-6 space-y-6">
                     <Card>
-                        <CardHeader><CardTitle>Add New Startup</CardTitle><CardDescription>Add a new startup to the Infinity Hub ecosystem.</CardDescription></CardHeader>
+                        <CardHeader className="flex flex-row items-center justify-between">
+                            <div>
+                                <CardTitle>Startups</CardTitle>
+                                <CardDescription>Manage startups in the Infinity Hub ecosystem.</CardDescription>
+                            </div>
+                            <Button onClick={() => setIsAddStartupDialogOpen(true)}>
+                                <PlusCircle className="mr-2 h-4 w-4" />
+                                Add Startup
+                            </Button>
+                        </CardHeader>
                         <CardContent>
-                            <form onSubmit={handleAddStartup} className="space-y-4">
-                                <div className="space-y-2"><Label htmlFor="startup-new-name">Startup Name</Label><Input id="startup-new-name" placeholder="e.g., QuantumLeap" value={newStartupName} onChange={(e) => setNewStartupName(e.target.value)} /></div>
-                                <div className="space-y-2"><Label htmlFor="startup-new-desc">Description</Label><Textarea id="startup-new-desc" placeholder="What does this startup do?" value={newStartupDescription} onChange={(e) => setNewStartupDescription(e.target.value)} /></div>
-                                 <div className="space-y-2"><Label htmlFor="startup-new-website">Website</Label><Input id="startup-new-website" placeholder="https://quantumleap.ai" value={newStartupWebsite} onChange={(e) => setNewStartupWebsite(e.target.value)} /></div>
-                                <Button type="submit">Add Startup</Button>
-                            </form>
-                        </CardContent>
-                    </Card>
-                    <Card>
-                        <CardHeader><CardTitle>Existing Startups</CardTitle></CardHeader>
-                        <CardContent>
-                            <Table><TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Description</TableHead><TableHead>Website</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Startup Name</TableHead>
+                                        <TableHead>Founder</TableHead>
+                                        <TableHead>Founder Email</TableHead>
+                                        <TableHead><Users className="inline-block mr-1 h-4 w-4"/>Members</TableHead>
+                                        <TableHead className="text-right">Actions</TableHead>
+                                    </TableRow>
+                                </TableHeader>
                                 <TableBody>
                                     {startups.map((startup) => (
                                         <TableRow key={startup.id}>
                                             <TableCell className="font-medium">{startup.name}</TableCell>
-                                            <TableCell>{startup.description}</TableCell>
-                                            <TableCell><a href={startup.website} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{startup.website}</a></TableCell>
+                                            <TableCell>{startup.founderName}</TableCell>
+                                            <TableCell>{startup.founderEmail}</TableCell>
+                                            <TableCell>{startup.members}</TableCell>
                                             <TableCell className="text-right">
                                                 <Button variant="ghost" size="icon" onClick={() => { setStartupToDelete(startup); setIsDeleteAlertOpen(true); }}>
                                                     <Trash2 className="h-4 w-4 text-destructive" />
@@ -322,46 +382,6 @@ export default function AdminDashboardPage() {
                     </Card>
                 </TabsContent>
                 
-                <TabsContent value="startup-users" className="mt-6 space-y-6">
-                    <Card>
-                        <CardHeader><CardTitle>Assign User to Startup</CardTitle><CardDescription>Grant a registered user access to a specific startup's hub.</CardDescription></CardHeader>
-                        <CardContent>
-                            <form onSubmit={handleAssignUser} className="space-y-4">
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    <div className="space-y-2"><Label htmlFor="user-select">User</Label>
-                                        <Select onValueChange={setSelectedUser} value={selectedUser}><SelectTrigger id="user-select"><SelectValue placeholder="Select a user" /></SelectTrigger>
-                                            <SelectContent>{users.filter(u => !startupUsers.some(su => su.uid === u.uid)).map(user => (<SelectItem key={user.uid} value={user.uid}>{user.firstName} {user.lastName} ({user.email})</SelectItem>))}</SelectContent>
-                                        </Select>
-                                    </div>
-                                    <div className="space-y-2"><Label htmlFor="startup-select">Startup</Label>
-                                        <Select onValueChange={setSelectedStartup} value={selectedStartup}><SelectTrigger id="startup-select"><SelectValue placeholder="Select a startup" /></SelectTrigger>
-                                            <SelectContent>{startups.map(startup => (<SelectItem key={startup.id} value={startup.id}>{startup.name}</SelectItem>))}</SelectContent>
-                                        </Select>
-                                    </div>
-                                    <div className="flex items-end"><Button type="submit" className="w-full">Assign User</Button></div>
-                                </div>
-                            </form>
-                        </CardContent>
-                    </Card>
-                    <Card>
-                        <CardHeader><CardTitle>Current Startup Users</CardTitle></CardHeader>
-                        <CardContent>
-                             <Table><TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Email</TableHead><TableHead>Assigned Startup</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
-                                <TableBody>
-                                    {startupUsers.map((user) => (
-                                        <TableRow key={user.uid}>
-                                            <TableCell className="font-medium">{user.firstName} {user.lastName}</TableCell>
-                                            <TableCell>{user.email}</TableCell>
-                                            <TableCell>{user.startupName}</TableCell>
-                                            <TableCell className="text-right"><Button variant="outline" size="sm" onClick={() => handleRevokeAccess(user.uid)}>Revoke Access</Button></TableCell>
-                                        </TableRow>
-                                    ))}
-                                </TableBody>
-                            </Table>
-                        </CardContent>
-                    </Card>
-                </TabsContent>
-
                 <TabsContent value="courses" className="mt-6 space-y-6">
                     <Card>
                         <CardHeader><CardTitle>Upload New Course</CardTitle><CardDescription>Add a new educational course for startups.</CardDescription></CardHeader>
@@ -411,3 +431,5 @@ export default function AdminDashboardPage() {
         </SubpageLayout>
     );
 }
+
+    
