@@ -199,7 +199,7 @@ export function HeaderActions() {
                     role,
                     createdAt: serverTimestamp(),
                     is_admin: false,
-                    photoURL: '',
+                    photoURL: null,
                     bio: '',
                 });
                 toast({ title: "Success", description: "Account created successfully!"});
@@ -256,7 +256,7 @@ export function HeaderActions() {
                     role: 'Other', // Default role
                     createdAt: serverTimestamp(),
                     is_admin: false,
-                    photoURL: user.photoURL || '',
+                    photoURL: user.photoURL || null,
                     bio: '',
                 });
             }
@@ -345,7 +345,7 @@ export function HeaderActions() {
                         <DropdownMenuTrigger asChild>
                             <Button variant="ghost" className="relative h-9 w-9 rounded-full">
                                 <Avatar className="h-9 w-9">
-                                    <AvatarImage src={user.photoURL || ''} alt={user.displayName || 'User'} />
+                                    <AvatarImage src={user.photoURL || undefined} alt={user.displayName || 'User'} />
                                     <AvatarFallback>{user.displayName?.split(' ').map(n => n[0]).join('').substring(0, 2) || user.email?.charAt(0).toUpperCase()}</AvatarFallback>
                                 </Avatar>
                             </Button>
