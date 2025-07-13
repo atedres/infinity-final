@@ -14,7 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { BookOpen, Briefcase, Ticket, Building2, UserCog, Trash2, PlusCircle, User, Users, MoreVertical, Edit, KeyRound, Copy } from "lucide-react";
 import { collection, addDoc, getDocs, doc, getDoc, updateDoc, deleteDoc, where, query, setDoc, writeBatch } from "firebase/firestore";
-import { onAuthStateChanged, createUserWithEmailAndPassword, updatePassword, getAuth } from "firebase/auth";
+import { onAuthStateChanged, createUserWithEmailAndPassword, updatePassword, getAuth, sendPasswordResetEmail } from "firebase/auth";
 import { db, auth } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -289,9 +289,10 @@ export default function AdminDashboardPage() {
         e.preventDefault();
         if (!db || !startupToEdit) return;
     
+        const startupRef = doc(db, "startups", startupToEdit.id);
+        const userRef = doc(db, "users", startupToEdit.founderId);
+        
         try {
-            const startupRef = doc(db, "startups", startupToEdit.id);
-            const userRef = doc(db, "users", startupToEdit.founderId);
             const batch = writeBatch(db);
     
             // Update startup document
@@ -300,12 +301,15 @@ export default function AdminDashboardPage() {
                 members: editedStartupMembers,
             });
     
-            // Update user document if email has changed in the form
-            // NOTE: This does NOT change the auth email, only the record in firestore.
+            // Update user document and startup document if email has changed
             if (editedFounderEmail !== startupToEdit.founderEmail) {
                  batch.update(startupRef, { founderEmail: editedFounderEmail });
                  batch.update(userRef, { email: editedFounderEmail });
-                 toast({ title: "Email Record Updated", description: "Founder's email record updated in database. Auth email not changed.", variant: "default" });
+                 toast({ 
+                     title: "Email Record Updated", 
+                     description: "Founder's email in database records has been updated. Note: This does NOT change their login email.", 
+                     variant: "default" 
+                    });
             }
     
             await batch.commit();
@@ -323,7 +327,17 @@ export default function AdminDashboardPage() {
     };
 
     const handleResetPassword = async (startup: Startup) => {
-        toast({ title: "This feature is not yet implemented.", description: "Please ask the developer to implement password reset via the Admin SDK.", variant: "destructive" });
+        if (!auth) {
+            toast({ title: "Error", description: "Authentication service not available.", variant: "destructive" });
+            return;
+        }
+        try {
+            await sendPasswordResetEmail(auth, startup.founderEmail);
+            toast({ title: "Success", description: `Password reset email sent to ${startup.founderEmail}.` });
+        } catch (error) {
+            console.error("Error sending password reset email:", error);
+            toast({ title: "Error", description: "Could not send password reset email.", variant: "destructive" });
+        }
     };
 
 
@@ -584,3 +598,4 @@ export default function AdminDashboardPage() {
     
 
     
+
