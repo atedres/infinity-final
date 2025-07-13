@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { BookOpen, Briefcase, Ticket, Building2, UserCog, Trash2, PlusCircle, User, Users, MoreVertical, Edit, KeyRound } from "lucide-react";
+import { BookOpen, Briefcase, Ticket, Building2, UserCog, Trash2, PlusCircle, User, Users, MoreVertical, Edit, KeyRound, Copy } from "lucide-react";
 import { collection, addDoc, getDocs, doc, getDoc, updateDoc, deleteDoc, where, query, setDoc, writeBatch } from "firebase/firestore";
 import { onAuthStateChanged, createUserWithEmailAndPassword, updatePassword } from "firebase/auth";
 import { db, auth } from "@/lib/firebase";
@@ -103,6 +103,7 @@ export default function AdminDashboardPage() {
     const [startupToEdit, setStartupToEdit] = useState<Startup | null>(null);
     const [editedStartupName, setEditedStartupName] = useState('');
     const [editedStartupMembers, setEditedStartupMembers] = useState(1);
+    const [editedFounderEmail, setEditedFounderEmail] = useState('');
 
 
      useEffect(() => {
@@ -273,15 +274,26 @@ export default function AdminDashboardPage() {
         e.preventDefault();
         if (!db || !startupToEdit) return;
         try {
+            const batch = writeBatch(db);
             const startupRef = doc(db, "startups", startupToEdit.id);
-            await updateDoc(startupRef, {
+            const userRef = doc(db, "users", startupToEdit.founderId);
+
+            batch.update(startupRef, {
                 name: editedStartupName,
                 members: editedStartupMembers,
+                founderEmail: editedFounderEmail,
             });
+
+            batch.update(userRef, {
+                email: editedFounderEmail,
+            });
+
+            await batch.commit();
+
             toast({ title: "Startup Updated", description: "Information has been saved." });
             fetchStartups();
         } catch (error) {
-            toast({ title: "Update Failed", description: "Could not save changes.", variant: "destructive" });
+            toast({ title: "Update Failed", description: "Could not save changes. Note: Changing an email via the SDK requires a special server-side setup not yet implemented.", variant: "destructive" });
         } finally {
             setIsEditStartupDialogOpen(false);
             setStartupToEdit(null);
@@ -311,6 +323,18 @@ export default function AdminDashboardPage() {
             setStartupToDelete(null);
         }
     };
+
+    const handleCopyPassword = () => {
+        if (newCredentials?.password) {
+            navigator.clipboard.writeText(newCredentials.password)
+                .then(() => {
+                    toast({ title: "Copied!", description: "Password copied to clipboard." });
+                })
+                .catch(err => {
+                    toast({ title: "Error", description: "Could not copy password.", variant: "destructive" });
+                });
+        }
+    };
     
     if (isLoading) return <SubpageLayout title="Admin Dashboard"><div className="flex justify-center items-center h-full"><p>Verifying access...</p></div></SubpageLayout>;
     if (!isAuthorized) return null;
@@ -337,7 +361,12 @@ export default function AdminDashboardPage() {
                     </AlertDialogHeader>
                     <div className="my-4 space-y-2 rounded-lg border bg-muted p-4">
                         <p className="text-sm"><strong>Email:</strong> {newCredentials?.email}</p>
-                        <p className="text-sm"><strong>Temporary Password:</strong> <span className="font-mono bg-background p-1 rounded">{newCredentials?.password}</span></p>
+                        <div className="flex items-center justify-between">
+                            <p className="text-sm"><strong>Temporary Password:</strong> <span className="font-mono bg-background p-1 rounded">{newCredentials?.password}</span></p>
+                            <Button variant="ghost" size="icon" onClick={handleCopyPassword}>
+                                <Copy className="h-4 w-4" />
+                            </Button>
+                        </div>
                     </div>
                     <AlertDialogFooter>
                         <AlertDialogAction onClick={() => setNewCredentials(null)}>Close</AlertDialogAction>
@@ -400,6 +429,10 @@ export default function AdminDashboardPage() {
                                 <Label htmlFor="edit-startup-members">Number of Members</Label>
                                 <Input id="edit-startup-members" type="number" value={editedStartupMembers} onChange={(e) => setEditedStartupMembers(parseInt(e.target.value, 10))} min="1" required />
                             </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="edit-founder-email">Founder's Email</Label>
+                                <Input id="edit-founder-email" type="email" value={editedFounderEmail} onChange={(e) => setEditedFounderEmail(e.target.value)} required />
+                            </div>
                         </div>
                         <DialogFooter>
                             <DialogClose asChild>
@@ -458,7 +491,7 @@ export default function AdminDashboardPage() {
                                                     </DropdownMenuTrigger>
                                                     <DropdownMenuContent align="end">
                                                         <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                                        <DropdownMenuItem onSelect={() => { setStartupToEdit(startup); setEditedStartupName(startup.name); setEditedStartupMembers(startup.members || 1); setIsEditStartupDialogOpen(true); }}>
+                                                        <DropdownMenuItem onSelect={() => { setStartupToEdit(startup); setEditedStartupName(startup.name); setEditedStartupMembers(startup.members || 1); setEditedFounderEmail(startup.founderEmail); setIsEditStartupDialogOpen(true); }}>
                                                             <Edit className="mr-2 h-4 w-4" /> Edit Information
                                                         </DropdownMenuItem>
                                                         <DropdownMenuItem onSelect={() => handleResetPassword(startup)}>
