@@ -12,9 +12,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { BookOpen, Briefcase, Ticket, Building2, UserCog, Trash2, PlusCircle, User, Users, MoreVertical, Edit, KeyRound, Copy, Link as LinkIcon } from "lucide-react";
+import { BookOpen, Briefcase, Ticket, Building2, UserCog, Trash2, PlusCircle, User, Users, MoreVertical, Edit, KeyRound, Copy, Link as LinkIcon, Share2 } from "lucide-react";
 import { collection, addDoc, getDocs, doc, getDoc, updateDoc, deleteDoc, where, query, setDoc, writeBatch } from "firebase/firestore";
-import { onAuthStateChanged, createUserWithEmailAndPassword, updatePassword, getAuth, sendPasswordResetEmail, deleteUser } from "firebase/auth";
+import { onAuthStateChanged, createUserWithEmailAndPassword, updateProfile, getAuth, sendPasswordResetEmail, deleteUser } from "firebase/auth";
 import { db, auth } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -210,7 +210,6 @@ export default function AdminDashboardPage() {
     
         const tempPassword = generateTempPassword();
         
-        // Use a secondary, temporary Firebase app to create user without logging out admin
         const firebaseConfig = {
             apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
             authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -223,6 +222,7 @@ export default function AdminDashboardPage() {
         try {
             const userCredential = await createUserWithEmailAndPassword(tempAuth, newFounderEmail, tempPassword);
             const user = userCredential.user;
+            await updateProfile(user, { displayName: `${newFounderFirstName} ${newFounderLastName}` });
     
             const startupRef = doc(collection(db, "startups"));
             const userDocRef = doc(db, "users", user.uid);
@@ -245,6 +245,7 @@ export default function AdminDashboardPage() {
                 role: 'Startup Founder',
                 startupId: startupRef.id,
                 photoURL: null,
+                bio: '',
             });
 
             await batch.commit();
@@ -283,7 +284,6 @@ export default function AdminDashboardPage() {
                 });
             }
         } finally {
-            // Clean up the temporary app instance
             await deleteApp(tempApp);
         }
     };
@@ -293,29 +293,24 @@ export default function AdminDashboardPage() {
         if (!db || !startupToEdit) return;
     
         const startupRef = doc(db, "startups", startupToEdit.id);
-        const userRef = doc(db, "users", startupToEdit.founderId);
         
         try {
-            const batch = writeBatch(db);
-    
-            // Update startup document
-            batch.update(startupRef, {
+            await updateDoc(startupRef, {
                 name: editedStartupName,
                 members: editedStartupMembers,
-                founderEmail: editedFounderEmail,
             });
     
-            // Update user document if email has changed
+            // If the email has been changed, we need to update it in the user's document
             if (editedFounderEmail !== startupToEdit.founderEmail) {
-                 batch.update(userRef, { email: editedFounderEmail });
-                 toast({ 
-                     title: "Founder Email Record Updated", 
-                     description: "The founder's email in database records has been updated. Note: This does NOT change their login email. To do that, generate a new password which will re-create their Auth account.", 
-                     variant: "default" 
-                    });
+                const userRef = doc(db, "users", startupToEdit.founderId);
+                await updateDoc(userRef, { email: editedFounderEmail });
+                
+                toast({ 
+                    title: "Founder Email Record Updated", 
+                    description: "The founder's email in database records has been updated. This does NOT change their login email. Use 'Generate New Password' to change login credentials.",
+                    duration: 7000,
+                });
             }
-    
-            await batch.commit();
     
             toast({ title: "Startup Updated", description: "Information has been saved successfully." });
             fetchStartups();
@@ -333,74 +328,26 @@ export default function AdminDashboardPage() {
         if (!auth || !db || !startupToReset) return;
 
         toast({ title: "Processing...", description: "Generating new password for founder." });
-
-        const { founderId, founderEmail, founderName } = startupToReset;
-        const tempPassword = generateTempPassword();
-
-        // Use a secondary, temporary Firebase app to manage users without affecting admin session
-        const firebaseConfig = {
-            apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-            authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-            projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-        };
-        const tempAppName = `temp-pw-reset-${Date.now()}`;
-        const tempApp = initializeApp(firebaseConfig, tempAppName);
-        const tempAuth = getAuth(tempApp);
+        const { founderEmail, founderName } = startupToReset;
         
         try {
-            // Step 1: Re-create the auth user with a new password.
-            // This implicitly handles deleting the old user if one exists with the same email in a more robust way
-            // by creating it in a temporary space. The old UID becomes invalid.
-            // For a full production system, a backend function to delete the user by UID first would be more direct.
-            const userCredential = await createUserWithEmailAndPassword(tempAuth, founderEmail, tempPassword);
-            const newAuthUser = userCredential.user;
-
-            // Step 2: Update the user's document in Firestore with the new UID
-            const userDocRef = doc(db, "users", founderId); // Old UID ref
-            const userDocSnap = await getDoc(userDocRef);
-
-            if (userDocSnap.exists()) {
-                const userData = userDocSnap.data();
-                const newUserDocRef = doc(db, "users", newAuthUser.uid);
-                const startupDocRef = doc(db, "startups", startupToReset.id);
-
-                const batch = writeBatch(db);
-                // Copy data to new user doc
-                batch.set(newUserDocRef, { ...userData, uid: newAuthUser.uid }); 
-                // Delete old user doc
-                batch.delete(userDocRef);
-                // Update startup doc with new founderId
-                batch.update(startupDocRef, { founderId: newAuthUser.uid });
-
-                await batch.commit();
-            } else {
-                 throw new Error("Original user document not found. Aborting password reset.");
-            }
-            
-            const startupUrl = `${window.location.origin}/startup-hub`;
-            setNewCredentials({ email: founderEmail, password: tempPassword, url: startupUrl });
-            toast({ title: "Success!", description: `New password generated for ${founderName}.` });
-            fetchStartups(); // Refresh the list to get the new founderId
-
-        } catch (error: any) {
-            console.error("Error generating new password:", error);
-            let description = "An unexpected error occurred.";
-             if (error.code === 'auth/email-already-in-use') {
-                description = "This email is already associated with an active account that could not be reset. Please contact support.";
-            }
-            toast({ title: "Password Generation Failed", description, variant: "destructive" });
+            await sendPasswordResetEmail(auth, founderEmail);
+            toast({ title: "Success!", description: `Password reset email sent to ${founderName} at ${founderEmail}.` });
+        } catch (error) {
+            console.error("Error sending password reset email:", error);
+            toast({ title: "Password Reset Failed", description: "Could not send password reset email.", variant: "destructive" });
         } finally {
-            await deleteApp(tempApp);
             setIsResetAlertOpen(false);
             setStartupToReset(null);
         }
     };
 
-
     const handleDeleteStartup = async () => {
         if (!db || !startupToDelete) return;
         try {
             await deleteDoc(doc(db, "startups", startupToDelete.id));
+            // Note: This does not delete the user account, only the startup document.
+            // The user will no longer be associated with a startup.
             toast({ title: "Startup Deleted", description: `${startupToDelete.name} has been removed.` });
             fetchStartups();
         } catch (error) {
@@ -411,16 +358,24 @@ export default function AdminDashboardPage() {
         }
     };
 
-    const handleCopy = (textToCopy: string, successMessage: string) => {
-        if (textToCopy) {
-            navigator.clipboard.writeText(textToCopy)
-                .then(() => {
-                    toast({ title: "Copied!", description: successMessage });
-                })
-                .catch(err => {
-                    toast({ title: "Error", description: "Could not copy text.", variant: "destructive" });
-                });
-        }
+    const handleShareCredentials = () => {
+        if (!newCredentials) return;
+        const textToCopy = `Welcome to the Startup Hub!
+
+Here are your login credentials:
+Login URL: ${newCredentials.url}
+Email: ${newCredentials.email}
+Temporary Password: ${newCredentials.password}
+
+Please change your password upon first login.
+`;
+        navigator.clipboard.writeText(textToCopy)
+            .then(() => {
+                toast({ title: "Copied to clipboard!", description: "Login details are ready to be shared." });
+            })
+            .catch(err => {
+                toast({ title: "Error", description: "Could not copy text.", variant: "destructive" });
+            });
     };
     
     if (isLoading) return <SubpageLayout title="Admin Dashboard"><div className="flex justify-center items-center h-full"><p>Verifying access...</p></div></SubpageLayout>;
@@ -432,7 +387,7 @@ export default function AdminDashboardPage() {
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                        <AlertDialogDescription>This action cannot be undone. This will permanently delete the startup {startupToDelete?.name}.</AlertDialogDescription>
+                        <AlertDialogDescription>This action cannot be undone. This will permanently delete the startup {startupToDelete?.name}. The founder's user account will remain but will no longer be linked to this startup.</AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel onClick={() => setStartupToDelete(null)}>Cancel</AlertDialogCancel>
@@ -443,14 +398,14 @@ export default function AdminDashboardPage() {
              <AlertDialog open={isResetAlertOpen} onOpenChange={setIsResetAlertOpen}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle>Generate New Password?</AlertDialogTitle>
+                        <AlertDialogTitle>Reset Founder's Password?</AlertDialogTitle>
                         <AlertDialogDescription>
-                            This will generate a new temporary password for {startupToReset?.founderName} and invalidate their old one. The user will be prompted to change it on their next login. Are you sure?
+                            This will send a password reset link to {startupToReset?.founderEmail}. The founder will be able to set a new password themselves. Are you sure?
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel onClick={() => setStartupToReset(null)}>Cancel</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleGenerateNewPassword}>Generate</AlertDialogAction>
+                        <AlertDialogAction onClick={handleGenerateNewPassword}>Send Reset Email</AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
@@ -462,20 +417,19 @@ export default function AdminDashboardPage() {
                     </AlertDialogHeader>
                     <div className="my-4 space-y-4 rounded-lg border bg-muted p-4">
                         <div className="flex items-center justify-between">
-                            <p className="text-sm"><strong>Login URL:</strong> <span className="font-mono bg-background p-1 rounded break-all">{newCredentials?.url}</span></p>
-                             <Button variant="ghost" size="icon" onClick={() => handleCopy(newCredentials?.url || '', 'Login URL copied to clipboard.')}>
-                                <LinkIcon className="h-4 w-4" />
-                            </Button>
+                            <p className="text-sm"><strong>Login URL:</strong></p>
+                             <a href={newCredentials?.url} target="_blank" rel="noopener noreferrer" className="font-mono bg-background p-1 rounded break-all text-primary hover:underline">{newCredentials?.url}</a>
                         </div>
                         <p className="text-sm"><strong>Email:</strong> {newCredentials?.email}</p>
                         <div className="flex items-center justify-between">
-                            <p className="text-sm"><strong>Temp Password:</strong> <span className="font-mono bg-background p-1 rounded">{newCredentials?.password}</span></p>
-                            <Button variant="ghost" size="icon" onClick={() => handleCopy(newCredentials?.password || '', 'Password copied to clipboard.')}>
-                                <Copy className="h-4 w-4" />
-                            </Button>
+                            <p className="text-sm"><strong>Temp Password:</strong></p>
+                            <span className="font-mono bg-background p-1 rounded">{newCredentials?.password}</span>
                         </div>
                     </div>
                     <AlertDialogFooter>
+                         <Button variant="outline" onClick={handleShareCredentials}>
+                            <Copy className="mr-2 h-4 w-4" /> Copy Details
+                        </Button>
                         <AlertDialogAction onClick={() => setNewCredentials(null)}>Close</AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>
@@ -538,8 +492,12 @@ export default function AdminDashboardPage() {
                                     <Input id="edit-startup-members" type="number" value={editedStartupMembers} onChange={(e) => setEditedStartupMembers(parseInt(e.target.value, 10))} min="1" required />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label htmlFor="edit-founder-email">Founder's Email</Label>
+                                    <Label htmlFor="edit-founder-email">Founder's Email (Record)</Label>
                                     <Input id="edit-founder-email" type="email" value={editedFounderEmail} onChange={(e) => setEditedFounderEmail(e.target.value)} required />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="startup-hub-url">Startup Hub URL</Label>
+                                    <Input id="startup-hub-url" value={`${window.location.origin}/startup-hub`} disabled />
                                 </div>
                             </div>
                             <DialogFooter>
@@ -604,7 +562,7 @@ export default function AdminDashboardPage() {
                                                             <Edit className="mr-2 h-4 w-4" /> Edit Information
                                                         </DropdownMenuItem>
                                                         <DropdownMenuItem onSelect={() => { setStartupToReset(startup); setIsResetAlertOpen(true); }}>
-                                                            <KeyRound className="mr-2 h-4 w-4" /> Generate New Password
+                                                            <KeyRound className="mr-2 h-4 w-4" /> Reset Password
                                                         </DropdownMenuItem>
                                                         <DropdownMenuSeparator />
                                                         <DropdownMenuItem onSelect={() => { setStartupToDelete(startup); setIsDeleteAlertOpen(true); }} className="text-destructive focus:text-destructive">
@@ -670,10 +628,3 @@ export default function AdminDashboardPage() {
         </SubpageLayout>
     );
 }
-
-    
-
-    
-
-
-
