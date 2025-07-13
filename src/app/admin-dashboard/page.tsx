@@ -231,6 +231,7 @@ export default function AdminDashboardPage() {
                 lastName: newFounderLastName,
                 role: 'Startup Founder',
                 startupId: startupRef.id,
+                photoURL: null,
             });
 
             await batch.commit();
@@ -561,5 +562,3 @@ export default function AdminDashboardPage() {
         </SubpageLayout>
     );
 }
-
-    
