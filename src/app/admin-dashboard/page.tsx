@@ -12,14 +12,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { BookOpen, Briefcase, Ticket, Building2, UserCog, Trash2, PlusCircle, User, Users } from "lucide-react";
-import { collection, addDoc, getDocs, doc, getDoc, updateDoc, deleteDoc, where, query, setDoc } from "firebase/firestore";
-import { onAuthStateChanged, createUserWithEmailAndPassword } from "firebase/auth";
+import { BookOpen, Briefcase, Ticket, Building2, UserCog, Trash2, PlusCircle, User, Users, MoreVertical, Edit, KeyRound } from "lucide-react";
+import { collection, addDoc, getDocs, doc, getDoc, updateDoc, deleteDoc, where, query, setDoc, writeBatch } from "firebase/firestore";
+import { onAuthStateChanged, createUserWithEmailAndPassword, updatePassword } from "firebase/auth";
 import { db, auth } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+
 
 // Types
 interface Course {
@@ -46,6 +48,7 @@ interface Ticket {
 interface Startup {
     id: string;
     name: string;
+    founderId: string;
     founderName: string;
     founderEmail: string;
     members: number;
@@ -87,12 +90,20 @@ export default function AdminDashboardPage() {
     const [projectDescription, setProjectDescription] = useState('');
     const [remuneration, setRemuneration] = useState('');
     const [skills, setSkills] = useState('');
+    
+    // Add Startup Dialog
     const [isAddStartupDialogOpen, setIsAddStartupDialogOpen] = useState(false);
     const [newStartupName, setNewStartupName] = useState('');
     const [newFounderFirstName, setNewFounderFirstName] = useState('');
     const [newFounderLastName, setNewFounderLastName] = useState('');
     const [newFounderEmail, setNewFounderEmail] = useState('');
-    const [newStartupMembers, setNewStartupMembers] = useState(1);
+    
+    // Edit Startup Dialog
+    const [isEditStartupDialogOpen, setIsEditStartupDialogOpen] = useState(false);
+    const [startupToEdit, setStartupToEdit] = useState<Startup | null>(null);
+    const [editedStartupName, setEditedStartupName] = useState('');
+    const [editedStartupMembers, setEditedStartupMembers] = useState(1);
+
 
      useEffect(() => {
         if (!auth || !db) { router.push('/'); return; }
@@ -196,22 +207,23 @@ export default function AdminDashboardPage() {
         let userCredential;
     
         try {
-            // Step 1: Attempt to create the user in Firebase Auth
             userCredential = await createUserWithEmailAndPassword(auth, newFounderEmail, tempPassword);
             const user = userCredential.user;
     
-            // Step 2: Create startup and user documents in a transaction
             const startupRef = doc(collection(db, "startups"));
             const userDocRef = doc(db, "users", user.uid);
     
-            await setDoc(startupRef, {
+            const batch = writeBatch(db);
+    
+            batch.set(startupRef, {
                 name: newStartupName,
                 founderName: `${newFounderFirstName} ${newFounderLastName}`,
                 founderEmail: newFounderEmail,
-                members: newStartupMembers,
+                founderId: user.uid,
+                members: 1, // Start with 1 member
             });
     
-            await setDoc(userDocRef, {
+            batch.set(userDocRef, {
                 uid: user.uid,
                 email: newFounderEmail,
                 firstName: newFounderFirstName,
@@ -219,17 +231,16 @@ export default function AdminDashboardPage() {
                 role: 'Startup Founder',
                 startupId: startupRef.id,
             });
+
+            await batch.commit();
     
-            // Step 3: Success operations
             setNewCredentials({ email: newFounderEmail, password: tempPassword });
             toast({ title: "Startup Created", description: `${newStartupName} has been added successfully.` });
     
-            // Reset form and close dialog
             setNewStartupName('');
             setNewFounderFirstName('');
             setNewFounderLastName('');
             setNewFounderEmail('');
-            setNewStartupMembers(1);
             setIsAddStartupDialogOpen(false);
             
             fetchStartups();
@@ -255,9 +266,37 @@ export default function AdminDashboardPage() {
                     variant: "destructive" 
                 });
             }
-            return; // Stop execution on error
         }
     };
+    
+    const handleEditStartup = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!db || !startupToEdit) return;
+        try {
+            const startupRef = doc(db, "startups", startupToEdit.id);
+            await updateDoc(startupRef, {
+                name: editedStartupName,
+                members: editedStartupMembers,
+            });
+            toast({ title: "Startup Updated", description: "Information has been saved." });
+            fetchStartups();
+        } catch (error) {
+            toast({ title: "Update Failed", description: "Could not save changes.", variant: "destructive" });
+        } finally {
+            setIsEditStartupDialogOpen(false);
+            setStartupToEdit(null);
+        }
+    };
+
+    const handleResetPassword = async (startup: Startup) => {
+        toast({ title: "This feature is not yet implemented.", description: "Please ask the developer to implement password reset via the Admin SDK.", variant: "destructive" });
+        // This is a placeholder. Implementing this safely requires an admin backend (e.g., Cloud Function)
+        // to interact with the Firebase Admin SDK, as client-side SDKs cannot directly change other users' passwords.
+        // const newPassword = generateTempPassword();
+        // setNewCredentials({ email: startup.founderEmail, password: newPassword });
+        // console.log(`TODO: Implement secure password reset for user ${startup.founderId} with new password ${newPassword}`);
+    };
+
 
     const handleDeleteStartup = async () => {
         if (!db || !startupToDelete) return;
@@ -293,8 +332,8 @@ export default function AdminDashboardPage() {
             <AlertDialog open={!!newCredentials} onOpenChange={(open) => !open && setNewCredentials(null)}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle>New Founder Account Created!</AlertDialogTitle>
-                        <AlertDialogDescription>Please securely share these temporary credentials with the founder. They will be prompted to change their password on first login.</AlertDialogDescription>
+                        <AlertDialogTitle>Founder Account Credentials</AlertDialogTitle>
+                        <AlertDialogDescription>Please securely share these credentials with the founder. They will be prompted to change their password on first login.</AlertDialogDescription>
                     </AlertDialogHeader>
                     <div className="my-4 space-y-2 rounded-lg border bg-muted p-4">
                         <p className="text-sm"><strong>Email:</strong> {newCredentials?.email}</p>
@@ -333,16 +372,40 @@ export default function AdminDashboardPage() {
                                 <Label htmlFor="founder-email">Founder's Email</Label>
                                 <Input id="founder-email" type="email" value={newFounderEmail} onChange={(e) => setNewFounderEmail(e.target.value)} required />
                             </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="startup-members">Number of Members</Label>
-                                <Input id="startup-members" type="number" value={newStartupMembers} onChange={(e) => setNewStartupMembers(parseInt(e.target.value, 10))} min="1" required />
-                            </div>
                         </div>
                         <DialogFooter>
                             <DialogClose asChild>
                                 <Button type="button" variant="outline">Cancel</Button>
                             </DialogClose>
                             <Button type="submit">Create Startup</Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
+            <Dialog open={isEditStartupDialogOpen} onOpenChange={setIsEditStartupDialogOpen}>
+                 <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Edit Startup Information</DialogTitle>
+                        <DialogDescription>
+                            Update the details for {startupToEdit?.name}.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={handleEditStartup}>
+                        <div className="grid gap-4 py-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="edit-startup-name">Startup Name</Label>
+                                <Input id="edit-startup-name" value={editedStartupName} onChange={(e) => setEditedStartupName(e.target.value)} required />
+                            </div>
+                             <div className="space-y-2">
+                                <Label htmlFor="edit-startup-members">Number of Members</Label>
+                                <Input id="edit-startup-members" type="number" value={editedStartupMembers} onChange={(e) => setEditedStartupMembers(parseInt(e.target.value, 10))} min="1" required />
+                            </div>
+                        </div>
+                        <DialogFooter>
+                            <DialogClose asChild>
+                                <Button type="button" variant="outline">Cancel</Button>
+                            </DialogClose>
+                            <Button type="submit">Save Changes</Button>
                         </DialogFooter>
                     </form>
                 </DialogContent>
@@ -386,9 +449,27 @@ export default function AdminDashboardPage() {
                                             <TableCell>{startup.founderEmail}</TableCell>
                                             <TableCell>{startup.members}</TableCell>
                                             <TableCell className="text-right">
-                                                <Button variant="ghost" size="icon" onClick={() => { setStartupToDelete(startup); setIsDeleteAlertOpen(true); }}>
-                                                    <Trash2 className="h-4 w-4 text-destructive" />
-                                                </Button>
+                                                <DropdownMenu>
+                                                    <DropdownMenuTrigger asChild>
+                                                        <Button variant="ghost" size="icon">
+                                                            <MoreVertical className="h-4 w-4" />
+                                                            <span className="sr-only">Open menu</span>
+                                                        </Button>
+                                                    </DropdownMenuTrigger>
+                                                    <DropdownMenuContent align="end">
+                                                        <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                                        <DropdownMenuItem onSelect={() => { setStartupToEdit(startup); setEditedStartupName(startup.name); setEditedStartupMembers(startup.members); setIsEditStartupDialogOpen(true); }}>
+                                                            <Edit className="mr-2 h-4 w-4" /> Edit Information
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem onSelect={() => handleResetPassword(startup)}>
+                                                            <KeyRound className="mr-2 h-4 w-4" /> Reset Password
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuSeparator />
+                                                        <DropdownMenuItem onSelect={() => { setStartupToDelete(startup); setIsDeleteAlertOpen(true); }} className="text-destructive focus:text-destructive">
+                                                            <Trash2 className="mr-2 h-4 w-4" /> Delete Startup
+                                                        </DropdownMenuItem>
+                                                    </DropdownMenuContent>
+                                                </DropdownMenu>
                                             </TableCell>
                                         </TableRow>
                                     ))}
@@ -448,5 +529,4 @@ export default function AdminDashboardPage() {
     );
 }
 
-    
     
