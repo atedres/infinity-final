@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { BookOpen, Briefcase, Ticket, Building2, UserCog, Trash2, PlusCircle, User, Users, MoreVertical, Edit, KeyRound, Copy, Link as LinkIcon, Share2 } from "lucide-react";
+import { BookOpen, Briefcase, Ticket, Building2, UserCog, Trash2, PlusCircle, User, Users, MoreVertical, Edit, KeyRound, Copy, Link as LinkIcon, Share2, Mail } from "lucide-react";
 import { collection, addDoc, getDocs, doc, getDoc, updateDoc, deleteDoc, where, query, setDoc, writeBatch } from "firebase/firestore";
 import { onAuthStateChanged, createUserWithEmailAndPassword, updateProfile, getAuth, sendPasswordResetEmail, deleteUser } from "firebase/auth";
 import { db, auth } from "@/lib/firebase";
@@ -358,7 +358,7 @@ export default function AdminDashboardPage() {
         }
     };
 
-    const handleShareCredentials = () => {
+    const handleCopyCredentials = () => {
         if (!newCredentials) return;
         const textToCopy = `Welcome to the Startup Hub!
 
@@ -376,6 +376,25 @@ Please change your password upon first login.
             .catch(err => {
                 toast({ title: "Error", description: "Could not copy text.", variant: "destructive" });
             });
+    };
+
+    const handleEmailCredentials = () => {
+        if (!newCredentials) return;
+        const subject = "Your Infinity Hub Account Credentials";
+        const body = `Welcome to the Startup Hub!
+
+Here are your login credentials:
+Login URL: ${newCredentials.url}
+Email: ${newCredentials.email}
+Temporary Password: ${newCredentials.password}
+
+We recommend you log in and change your password at your earliest convenience.
+
+Best regards,
+The Infinity Software Team`;
+
+        const mailtoLink = `mailto:${newCredentials.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        window.location.href = mailtoLink;
     };
     
     if (isLoading) return <SubpageLayout title="Admin Dashboard"><div className="flex justify-center items-center h-full"><p>Verifying access...</p></div></SubpageLayout>;
@@ -427,7 +446,10 @@ Please change your password upon first login.
                         </div>
                     </div>
                     <AlertDialogFooter>
-                         <Button variant="outline" onClick={handleShareCredentials}>
+                         <Button variant="secondary" onClick={handleEmailCredentials}>
+                            <Mail className="mr-2 h-4 w-4" /> Email Credentials
+                        </Button>
+                         <Button variant="outline" onClick={handleCopyCredentials}>
                             <Copy className="mr-2 h-4 w-4" /> Copy Details
                         </Button>
                         <AlertDialogAction onClick={() => setNewCredentials(null)}>Close</AlertDialogAction>
