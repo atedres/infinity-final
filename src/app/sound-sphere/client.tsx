@@ -1608,7 +1608,9 @@ export default function SoundSphereClient() {
                         <DialogTitle>View Image</DialogTitle>
                         <DialogDescription>Full-screen view of the post image.</DialogDescription>
                     </DialogHeader>
-                    <Image src={viewingImage || ''} alt="Full screen post image" width={1200} height={800} className="w-full h-auto object-contain rounded-lg"/>
+                    {viewingImage && (
+                        <Image src={viewingImage} alt="Full screen post image" width={1200} height={800} className="w-full h-auto object-contain rounded-lg"/>
+                    )}
                 </DialogContent>
             </Dialog>
             
