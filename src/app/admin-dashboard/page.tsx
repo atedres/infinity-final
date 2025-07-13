@@ -14,13 +14,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { BookOpen, Briefcase, Ticket, Building2, UserCog, Trash2, PlusCircle, User, Users, MoreVertical, Edit, KeyRound, Copy } from "lucide-react";
 import { collection, addDoc, getDocs, doc, getDoc, updateDoc, deleteDoc, where, query, setDoc, writeBatch } from "firebase/firestore";
-import { onAuthStateChanged, createUserWithEmailAndPassword, updatePassword } from "firebase/auth";
+import { onAuthStateChanged, createUserWithEmailAndPassword, updatePassword, getAuth } from "firebase/auth";
 import { db, auth } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { initializeApp, deleteApp, getApp, getApps } from "firebase/app";
 
 
 // Types
@@ -205,10 +206,19 @@ export default function AdminDashboardPage() {
         if (!auth || !db) return;
     
         const tempPassword = generateTempPassword();
-        let userCredential;
-    
+        
+        // Use a secondary, temporary Firebase app to create user without logging out admin
+        const firebaseConfig = {
+            apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+            authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+            projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+        };
+        const tempAppName = `temp-user-creation-${Date.now()}`;
+        const tempApp = initializeApp(firebaseConfig, tempAppName);
+        const tempAuth = getAuth(tempApp);
+
         try {
-            userCredential = await createUserWithEmailAndPassword(auth, newFounderEmail, tempPassword);
+            const userCredential = await createUserWithEmailAndPassword(tempAuth, newFounderEmail, tempPassword);
             const user = userCredential.user;
     
             const startupRef = doc(collection(db, "startups"));
@@ -221,7 +231,7 @@ export default function AdminDashboardPage() {
                 founderName: `${newFounderFirstName} ${newFounderLastName}`,
                 founderEmail: newFounderEmail,
                 founderId: user.uid,
-                members: 1, // Start with 1 member
+                members: 1, 
             });
     
             batch.set(userDocRef, {
@@ -268,6 +278,9 @@ export default function AdminDashboardPage() {
                     variant: "destructive" 
                 });
             }
+        } finally {
+            // Clean up the temporary app instance
+            await deleteApp(tempApp);
         }
     };
     
@@ -303,11 +316,6 @@ export default function AdminDashboardPage() {
 
     const handleResetPassword = async (startup: Startup) => {
         toast({ title: "This feature is not yet implemented.", description: "Please ask the developer to implement password reset via the Admin SDK.", variant: "destructive" });
-        // This is a placeholder. Implementing this safely requires an admin backend (e.g., Cloud Function)
-        // to interact with the Firebase Admin SDK, as client-side SDKs cannot directly change other users' passwords.
-        // const newPassword = generateTempPassword();
-        // setNewCredentials({ email: startup.founderEmail, password: newPassword });
-        // console.log(`TODO: Implement secure password reset for user ${startup.founderId} with new password ${newPassword}`);
     };
 
 
@@ -562,3 +570,5 @@ export default function AdminDashboardPage() {
         </SubpageLayout>
     );
 }
+
+    
