@@ -82,7 +82,7 @@ export default function AdminDashboardPage() {
     const [courseDescription, setCourseDescription] = useState('');
     const [courseVideoUrl, setCourseVideoUrl] = useState('');
     const [projectTitle, setProjectTitle] = useState('');
-    const [startupName, setStartupName] = useState('');
+    const [projectStartupId, setProjectStartupId] = useState('');
     const [projectDescription, setProjectDescription] = useState('');
     const [remuneration, setRemuneration] = useState('');
     const [skills, setSkills] = useState('');
@@ -177,12 +177,34 @@ export default function AdminDashboardPage() {
     };
 
     const handleAddProject = async (e: React.FormEvent) => {
-        e.preventDefault(); if (!db) return;
+        e.preventDefault(); if (!db || !projectStartupId) return;
+        
+        const selectedStartup = startups.find(s => s.id === projectStartupId);
+        if (!selectedStartup) {
+            toast({ title: "Error", description: "Selected startup not found.", variant: "destructive"});
+            return;
+        }
+
         try {
-            await addDoc(collection(db, "projects"), { title: projectTitle, startup: startupName, description: projectDescription, remuneration: remuneration, skills: skills.split(',').map(s => s.trim()), logo: "https://placehold.co/40x40.png", dataAiHint: "abstract geometric" });
+            await addDoc(collection(db, "projects"), { 
+                title: projectTitle, 
+                startup: selectedStartup.name,
+                description: projectDescription, 
+                remuneration: remuneration, 
+                skills: skills.split(',').map(s => s.trim()), 
+                logo: "https://placehold.co/40x40.png", 
+                dataAiHint: "abstract geometric" 
+            });
             toast({ title: "Project added successfully." });
-            setProjectTitle(''); setStartupName(''); setProjectDescription(''); setRemuneration(''); setSkills(''); fetchProjects();
-        } catch (error) { toast({ title: "Failed to add project.", variant: "destructive" }); }
+            setProjectTitle(''); 
+            setProjectStartupId(''); 
+            setProjectDescription(''); 
+            setRemuneration(''); 
+            setSkills(''); 
+            fetchProjects();
+        } catch (error) { 
+            toast({ title: "Failed to add project.", variant: "destructive" }); 
+        }
     };
 
     const handleAddStartup = async (e: React.FormEvent) => {
@@ -361,7 +383,7 @@ export default function AdminDashboardPage() {
                         <CardHeader><CardTitle>Add New Project</CardTitle><CardDescription>Post a new job opportunity for freelancers.</CardDescription></CardHeader>
                         <CardContent><form onSubmit={handleAddProject} className="space-y-4">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div className="space-y-2"><Label htmlFor="project-title">Project Title</Label><Input id="project-title" placeholder="e.g., Senior Frontend Engineer" value={projectTitle} onChange={(e) => setProjectTitle(e.target.value)} /></div>
-                            <div className="space-y-2"><Label htmlFor="startup-name">Startup Name</Label><Select onValueChange={setStartupName} value={startupName}><SelectTrigger id="startup-name"><SelectValue placeholder="Select a startup" /></SelectTrigger><SelectContent>{startups.map(startup => (<SelectItem key={startup.id} value={startup.name}>{startup.name}</SelectItem>))}</SelectContent></Select></div></div>
+                            <div className="space-y-2"><Label htmlFor="startup-name">Startup Name</Label><Select onValueChange={setProjectStartupId} value={projectStartupId}><SelectTrigger id="startup-name"><SelectValue placeholder="Select a startup" /></SelectTrigger><SelectContent>{startups.map(startup => (<SelectItem key={startup.id} value={startup.id}>{startup.name}</SelectItem>))}</SelectContent></Select></div></div>
                             <div className="space-y-2"><Label htmlFor="project-description">Description</Label><Textarea id="project-description" placeholder="Detailed job description..." value={projectDescription} onChange={(e) => setProjectDescription(e.target.value)} /></div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div className="space-y-2"><Label htmlFor="remuneration">Remuneration</Label><Input id="remuneration" placeholder="e.g., Equity + Salary" value={remuneration} onChange={(e) => setRemuneration(e.target.value)} /></div>
                             <div className="space-y-2"><Label htmlFor="skills">Skills Required</Label><Input id="skills" placeholder="Comma-separated, e.g., React, TypeScript" value={skills} onChange={(e) => setSkills(e.target.value)} /></div></div>
