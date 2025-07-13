@@ -458,7 +458,7 @@ export default function AdminDashboardPage() {
                                                     </DropdownMenuTrigger>
                                                     <DropdownMenuContent align="end">
                                                         <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                                        <DropdownMenuItem onSelect={() => { setStartupToEdit(startup); setEditedStartupName(startup.name); setEditedStartupMembers(startup.members); setIsEditStartupDialogOpen(true); }}>
+                                                        <DropdownMenuItem onSelect={() => { setStartupToEdit(startup); setEditedStartupName(startup.name); setEditedStartupMembers(startup.members || 1); setIsEditStartupDialogOpen(true); }}>
                                                             <Edit className="mr-2 h-4 w-4" /> Edit Information
                                                         </DropdownMenuItem>
                                                         <DropdownMenuItem onSelect={() => handleResetPassword(startup)}>
