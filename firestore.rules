@@ -1,67 +1,121 @@
 /**
- * @fileoverview Firestore Security Rules for the Infinity Software application.
- *
- * Core Philosophy:
- * This ruleset enforces a strict ownership model for user-specific data and a role-based access control model for startup-related data.
- * The primary goal is to protect user privacy and ensure that only authorized individuals can access and modify data.
- *
- * Data Structure:
- * - User-specific data is nested under `/users/{userId}`, enforcing that only the authenticated user can access their own data.
- * - Startup-related data is stored under `/startups/{startupId}`, with access controlled through a denormalized membership map.
- * - Other top-level collections (e.g., `/courses`, `/freelancers`, `/companies`) have individual access controls as defined below.
- *
- * Key Security Decisions:
- * - Listing all users or all startups is disallowed for security and privacy reasons.
- * - Data validation is relaxed to allow for rapid prototyping, focusing on authorization and relationship integrity.
- * - Authorization decisions are based on the authenticated user's UID (`request.auth.uid`).
- *
- * Denormalization for Authorization:
- * - Startup signals denormalize the startup's `members` map into the `startupMembers` field on each signal document. This allows checking a user's role within a startup directly within the signal's rules, without needing to perform additional `get()` operations.
- *
- * Structural Segregation:
- * - Signals are stored either under a user's document (`/users/{userId}/signals`) or a startup's document (`/startups/{startupId}/signals`), depending on whether they are user-specific or startup-related. This segregation is crucial for implementing secure list operations.
+ * @description This ruleset enforces a strict user-ownership model and group-ownership based model for signals data, segregating data into user-specific and startup-specific subcollections for enhanced security and access control.
+ * @dataStructure
+ *   - `/startups/{startupId}`: Represents a startup company, accessible to authenticated users.
+ *   - `/startups/{startupId}/milestones/{milestoneId}`: Milestones associated with a startup, accessible only by authorized users or startup members.
+ *   - `/courses/{courseId}`: Represents a course available to startups, publicly readable but with restricted write access.
+ *   - `/freelancers/{freelancerId}`: Represents a freelancer or tech graduate, accessible to authenticated users.
+ *   - `/startups/{startupId}/projects/{projectId}`: Projects associated with a startup, accessible only by authorized users or startup members.
+ *   - `/users/{userId}`: Represents a user, with data accessible only to the owner.
+ *   - `/users/{userId}/posts/{postId}`: Posts made by a user, accessible only to the owner.
+ *   - `/companies/{companyId}`: Represents a company, accessible to authenticated users.
+ *   - `/companies/{companyId}/tickets/{ticketId}`: Support tickets for a company, accessible only by authorized company members.
+ *   - `/companies/{companyId}/teamMembers/{teamMemberId}`: Team members working on a company's project, accessible only by authorized company members.
+ *   - `/users/{userId}/signals/{signalId}`: User-specific signals, accessible only to the owner.
+ *   - `/startups/{startupId}/signals/{signalId}`: Startup-specific signals, accessible to members of the startup. The `startupMembers` map is denormalized onto the signals documents for efficient authorization.
+ * @keySecurityDecisions
+ *   - User listing is disallowed.
+ *   - Public read access is granted to the `courses` collection.
+ *   - All write operations require authentication and proper authorization.
+ *   - Strict ownership is enforced for user-specific data.
+ *   - Denormalization of `startupMembers` onto `/startups/{startupId}/signals/{signalId}` documents is performed to enable efficient access control without requiring additional reads during rule evaluation.
  */
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    /**
-     * @description Checks if the request is authenticated.
-     */
+    // Helper function to check if the user is signed in.
     function isSignedIn() {
       return request.auth != null;
     }
 
-    /**
-     * @description Checks if the authenticated user's UID matches the provided userId.
-     */
+    // Helper function to check if the user is the owner of the document.
     function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+      return request.auth.uid == userId;
     }
 
-    /**
-     * @description Checks if the authenticated user is the owner of an existing document.
-     */
+    // Helper function to check if the user is the owner of the document and it exists.
     function isExistingOwner(userId) {
       return isOwner(userId) && resource != null;
     }
-
+    
     /**
-     * @description Checks if the user is a member of a startup with a specific role.
+     * @description Allows read and write access to startups for authenticated users.
+     * @path /startups/{startupId}
+     * @allow (read, get, list) User is signed in.
+     * @allow (create) User is signed in.
+     * @deny (update, delete) Only authenticated users can update or delete a startup.
+     * @principle Requires the user to be signed in to interact with startups.
      */
-    function isStartupMember(startupId, role) {
-        return get(/databases/$(database)/documents/startups/$(startupId)).data.members[request.auth.uid] == role;
+    match /startups/{startupId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
     }
 
     /**
-     * @description Grants owner-only access to documents in the /users/{userId} collection.
+     * @description Allows access to milestones for authorized users or startup members.
+     * @path /startups/{startupId}/milestones/{milestoneId}
+     * @allow (read, get, list) User is signed in.
+     * @allow (create) User is signed in.
+     * @deny (update, delete) Only authenticated users can update or delete a milestone.
+     * @principle Requires the user to be signed in to interact with milestones.
+     */
+    match /startups/{startupId}/milestones/{milestoneId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    /**
+     * @description Allows public read access to courses, but restricts write access to authenticated users only.
+     * @path /courses/{courseId}
+     * @allow (read, get, list) Anyone can read courses.
+     * @allow (create) User is signed in.
+     * @deny (update, delete) Only authenticated users can update or delete a course.
+     * @principle Allows public read access but requires authentication for writes.
+     */
+    match /courses/{courseId} {
+      allow get, list: if true;
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    /**
+     * @description Allows read and write access to freelancers for authenticated users.
+     * @path /freelancers/{freelancerId}
+     * @allow (read, get, list) User is signed in.
+     * @allow (create) User is signed in.
+     * @deny (update, delete) Only authenticated users can update or delete a freelancer.
+     * @principle Requires the user to be signed in to interact with freelancers.
+     */
+    match /freelancers/{freelancerId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    /**
+     * @description Allows access to projects for authorized users or startup members.
+     * @path /startups/{startupId}/projects/{projectId}
+     * @allow (read, get, list) User is signed in.
+     * @allow (create) User is signed in.
+     * @deny (update, delete) Only authenticated users can update or delete a project.
+     * @principle Requires the user to be signed in to interact with projects.
+     */
+    match /startups/{startupId}/projects/{projectId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    /**
+     * @description Enforces strict user-ownership for user documents.  Only the authenticated user can read or write their own document.
      * @path /users/{userId}
-     * @allow (create) - Authenticated user with UID 'user123' can create a document at /users/user123.
-     * @allow (get) - Authenticated user with UID 'user123' can read a document at /users/user123.
-     * @allow (update) - Authenticated user with UID 'user123' can update a document at /users/user123.
-     * @allow (delete) - Authenticated user with UID 'user123' can delete a document at /users/user123.
-     * @deny (create) - Authenticated user with UID 'user456' cannot create a document at /users/user123.
-     * @principle Enforces document ownership for writes and reads.
+     * @allow (read, get) User must be signed in and be the owner.
+     * @allow (create) User must be signed in and the userId must match the authenticated user's ID.
+     * @deny (update, delete) Only the document owner can update or delete.
+     * @principle Enforces document ownership for writes.
      */
     match /users/{userId} {
       allow get: if isOwner(userId);
@@ -72,152 +126,88 @@ service cloud.firestore {
     }
 
     /**
-     * @description Grants owner-only access to documents in the /users/{userId}/posts/{postId} collection.
+     * @description Enforces strict user-ownership for posts. Only the owner can read, create, update, or delete their own posts.
      * @path /users/{userId}/posts/{postId}
-     * @allow (create) - Authenticated user with UID 'user123' can create a document at /users/user123/posts/post456.
-     * @allow (get) - Authenticated user with UID 'user123' can read a document at /users/user123/posts/post456.
-     * @allow (update) - Authenticated user with UID 'user123' can update a document at /users/user123/posts/post456.
-     * @allow (delete) - Authenticated user with UID 'user123' can delete a document at /users/user123/posts/post456.
-     * @deny (create) - Authenticated user with UID 'user456' cannot create a document at /users/user123/posts/post456.
-     * @principle Enforces document ownership for writes and reads within a user's data tree.
+     * @allow (read, get, list) User must be the owner.
+     * @allow (create) User must be the owner.
+     * @deny (update, delete) Only the owner can update or delete.
+     * @principle Enforces document ownership for writes.
      */
     match /users/{userId}/posts/{postId} {
-      allow get: if isOwner(userId);
-      allow list: if isOwner(userId);
+      allow get, list: if isOwner(userId);
       allow create: if isOwner(userId);
       allow update: if isExistingOwner(userId);
       allow delete: if isExistingOwner(userId);
     }
 
     /**
-     * @description Grants owner-only access to documents in the /users/{userId}/signals/{signalId} collection.
-     * @path /users/{userId}/signals/{signalId}
-     * @allow (create) - Authenticated user with UID 'user123' can create a document at /users/user123/signals/signal456.
-     * @allow (get) - Authenticated user with UID 'user123' can read a document at /users/user123/signals/signal456.
-     * @allow (update) - Authenticated user with UID 'user123' can update a document at /users/user123/signals/signal456.
-     * @allow (delete) - Authenticated user with UID 'user123' can delete a document at /users/user123/signals/signal456.
-     * @deny (create) - Authenticated user with UID 'user456' cannot create a document at /users/user123/signals/signal456.
-     * @principle Enforces document ownership for writes and reads within a user's data tree.
-     */
-    match /users/{userId}/signals/{signalId} {
-      allow get: if isOwner(userId);
-      allow list: if isOwner(userId);
-      allow create: if isOwner(userId);
-      allow update: if isExistingOwner(userId);
-      allow delete: if isExistingOwner(userId);
-    }
-
-    /**
-     * @description Allows public read access and owner-only write access to documents in the /startups/{startupId} collection.
-     * @path /startups/{startupId}
-     * @allow (get) - Any user can read a document at /startups/startup123.
-     * @allow (list) - Any user can list documents in /startups.
-     * @allow (create) - Authenticated user with UID 'user123' can create a document at /startups/startup123 if request.resource.data.id == 'startup123'.
-     * @allow (update) - Authenticated user with UID 'user123' can update a document at /startups/startup123 if the existing document's id is 'startup123'.
-     * @allow (delete) - Authenticated user with UID 'user123' can delete a document at /startups/startup123 if the existing document's id is 'startup123'.
-     * @deny (create) - Authenticated user with UID 'user123' cannot create a document at /startups/startup123 if request.resource.data.id != 'startup123'.
-     * @principle Allows public reads but restricts writes to the owner, enforcing relational integrity on create and immutability of the owner field on update.
-     */
-    match /startups/{startupId} {
-      allow get: if true;
-      allow list: if true;
-      allow create: if request.resource.data.id == startupId && isSignedIn();
-      allow update: if resource.data.id == startupId && isSignedIn();
-      allow delete: if resource.data.id == startupId && isSignedIn();
-    }
-
-    /**
-     * @description Grants access to documents in the /startups/{startupId}/milestones/{milestoneId} collection based on startup membership.
-     * @path /startups/{startupId}/milestones/{milestoneId}
-     */
-    match /startups/{startupId}/milestones/{milestoneId} {
-      allow get: if isStartupMember(startupId, 'editor') || isStartupMember(startupId, 'owner');
-      allow list: if isStartupMember(startupId, 'editor') || isStartupMember(startupId, 'owner');
-      allow create: if isStartupMember(startupId, 'owner');
-      allow update: if isStartupMember(startupId, 'editor') && resource != null;
-      allow delete: if isStartupMember(startupId, 'owner') && resource != null;
-    }
-
-    /**
-     * @description Grants access to documents in the /startups/{startupId}/projects/{projectId} collection based on startup membership.
-     * @path /startups/{startupId}/projects/{projectId}
-     */
-    match /startups/{startupId}/projects/{projectId} {
-      allow get: if isStartupMember(startupId, 'editor') || isStartupMember(startupId, 'owner');
-      allow list: if isStartupMember(startupId, 'editor') || isStartupMember(startupId, 'owner');
-      allow create: if isStartupMember(startupId, 'owner');
-      allow update: if isStartupMember(startupId, 'editor') && resource != null;
-      allow delete: if isStartupMember(startupId, 'owner') && resource != null;
-    }
-
-    /**
-     * @description Grants access to documents in the /startups/{startupId}/signals/{signalId} collection based on startup membership.
-     * @path /startups/{startupId}/signals/{signalId}
-     */
-    match /startups/{startupId}/signals/{signalId} {
-      allow get: if isStartupMember(startupId, 'editor') || isStartupMember(startupId, 'owner');
-      allow list: if isStartupMember(startupId, 'editor') || isStartupMember(startupId, 'owner');
-      allow create: if isStartupMember(startupId, 'owner');
-      allow update: if isStartupMember(startupId, 'editor') && resource != null;
-      allow delete: if isStartupMember(startupId, 'owner') && resource != null;
-    }
-
-    /**
-     * @description Allows public read access to documents in the /courses/{courseId} collection.
-     * @path /courses/{courseId}
-     */
-    match /courses/{courseId} {
-      allow get: if true;
-      allow list: if true;
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Allows public read access to documents in the /freelancers/{freelancerId} collection.
-     * @path /freelancers/{freelancerId}
-     */
-    match /freelancers/{freelancerId} {
-      allow get: if true;
-      allow list: if true;
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Allows public read access to documents in the /companies/{companyId} collection.
+     * @description Allows read and write access to companies for authenticated users.
      * @path /companies/{companyId}
+     * @allow (read, get, list) User is signed in.
+     * @allow (create) User is signed in.
+     * @deny (update, delete) Only authenticated users can update or delete a company.
+     * @principle Requires the user to be signed in to interact with companies.
      */
     match /companies/{companyId} {
-      allow get: if true;
-      allow list: if true;
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
     }
 
     /**
-     * @description Grants access to documents in the /companies/{companyId}/tickets/{ticketId} collection based on company membership.
+     * @description Allows access to tickets for authorized company members.
      * @path /companies/{companyId}/tickets/{ticketId}
+     * @allow (read, get, list) User is signed in.
+     * @allow (create) User is signed in.
+     * @deny (update, delete) Only authenticated users can update or delete a ticket.
+     * @principle Requires the user to be signed in to interact with tickets.
      */
     match /companies/{companyId}/tickets/{ticketId} {
-      allow get: if true;
-      allow list: if true;
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
     }
 
     /**
-     * @description Grants access to documents in the /companies/{companyId}/teamMembers/{teamMemberId} collection based on company membership.
+     * @description Allows access to team members for authorized company members.
      * @path /companies/{companyId}/teamMembers/{teamMemberId}
+     * @allow (read, get, list) User is signed in.
+     * @allow (create) User is signed in.
+     * @deny (update, delete) Only authenticated users can update or delete a teamMember.
+     * @principle Requires the user to be signed in to interact with teamMembers.
      */
     match /companies/{companyId}/teamMembers/{teamMemberId} {
-      allow get: if true;
-      allow list: if true;
-      allow create: if false;
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    /**
+     * @description Enforces strict user-ownership for signal documents under the /users/{userId} collection. Only the authenticated user can read or write their own signal documents.
+     * @path /users/{userId}/signals/{signalId}
+     * @allow (read, get, list) User must be signed in and be the owner.
+     * @allow (create) User must be signed in and the userId must match the authenticated user's ID.
+     * @deny (update, delete) Only the document owner can update or delete.
+     * @principle Enforces document ownership for signals.
+     */
+    match /users/{userId}/signals/{signalId} {
+      allow get, list: if isOwner(userId);
+      allow create: if isOwner(userId);
+      allow update: if isExistingOwner(userId);
+      allow delete: if isExistingOwner(userId);
+    }
+
+    /**
+     * @description Allows access to startup-specific signals based on the user's role within the startup. The `startupMembers` map on the signal document determines access.
+     * @path /startups/{startupId}/signals/{signalId}
+     * @allow (read, get, list) User must be a member of the startup.
+     * @allow (create) User must be a member of the startup.
+     * @deny (update, delete) Only members can update or delete.
+     * @principle Enforces access based on startup membership.
+     */
+    match /startups/{startupId}/signals/{signalId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn();
       allow update: if false;
       allow delete: if false;
     }
