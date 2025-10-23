@@ -608,7 +608,7 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
             });
         }, async (error) => {
             const permissionError = new FirestorePermissionError({
-                path: '/signals',
+                path: 'signals',
                 operation: 'list',
             } satisfies SecurityRuleContext);
             errorEmitter.emit('permission-error', permissionError);
