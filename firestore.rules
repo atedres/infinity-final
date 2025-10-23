@@ -1,209 +1,312 @@
-/**
- * @fileoverview Firestore Security Rules for Sound Sphere.
- *
- * Core Philosophy: This ruleset enforces a strict ownership model for user and company data,
- * while providing controlled access to shared resources like startup and project information.
- * Authorization Independence is achieved through structural segregation (dedicated collections)
- * and data denormalization (explicit access modeling).
- *
- * Data Structure:
- * - /startups/{startupId}: Startup company information.
- * - /startups/{startupId}/milestones/{milestoneId}: Milestones for a specific startup.
- * - /courses/{courseId}: Courses available to startups.
- * - /freelancers/{freelancerId}: Freelancer profiles.
- * - /startups/{startupId}/projects/{projectId}: Projects associated with a startup.
- * - /users/{userId}: User profiles.
- * - /users/{userId}/posts/{postId}: Posts created by a user.
- * - /companies/{companyId}: Company profiles.
- * - /companies/{companyId}/tickets/{ticketId}: Support tickets for a company.
- * - /companies/{companyId}/teamMembers/{teamMemberId}: Team members within a company.
- * - /users/{userId}/signals/{signalId}: User-specific signals/notifications.
- * - /startups/{startupId}/signals/{signalId}: Startup-specific signals/notifications.
- *
- * Key Security Decisions:
- * - Listing of the top-level `/signals` collection is disallowed to prevent unauthorized access.
- *   Instead, access is granted through user-specific (`/users/{userId}/signals`) and
- *   startup-specific (`/startups/{startupId}/signals`) subcollections.
- * - Read access to courses is public.
- * - Write access is restricted based on ownership (e.g., users can only modify their own profiles and posts).
- * - Authorization Independence: Access control information (e.g., startup membership) is
- *   denormalized onto documents to avoid costly `get()` calls in security rules.
- */
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
     /**
-     * @description Grants access to startup documents.
-     * @path /startups/{startupId}
-     * @allow (read) Anyone can read a startup's information.
-     * @allow (create, update, delete) No one can create, update or delete a startup
-     * @deny (create, update, delete) No one can create, update, or delete startups.
-     * @principle Public read access, owner-only writes (not implemented due to missing ownership field).
-     */
-    match /startups/{startupId} {
-      allow get, list: if true;
-      allow create, update, delete: if false; // TODO: Add owner validation once the schema is updated with an ownership field.
-    }
-
-    /**
-     * @description Grants access to milestones within a startup.
-     * @path /startups/{startupId}/milestones/{milestoneId}
-     * @allow (read) Anyone can read a milestone within a startup.
-     * @allow (create, update, delete) No one can create, update or delete a milestone
-     * @deny (create, update, delete) No one can create, update, or delete milestones.
-     * @principle Public read access, owner-only writes (not implemented due to missing ownership field).
-     */
-    match /startups/{startupId}/milestones/{milestoneId} {
-      allow get, list: if true;
-      allow create, update, delete: if false; // TODO: Add owner validation once the schema is updated with an ownership field.
-    }
-
-    /**
-     * @description Grants access to course documents.
-     * @path /courses/{courseId}
-     * @allow (read) Anyone can read a course document.
-     * @allow (create, update, delete) No one can create, update or delete a course
-     * @deny (create, update, delete) No one can create, update, or delete courses.
-     * @principle Public read access, owner-only writes (not implemented due to missing ownership field).
-     */
-    match /courses/{courseId} {
-      allow get, list: if true;
-      allow create, update, delete: if false; // TODO: Add owner validation once the schema is updated with an ownership field.
-    }
-
-    /**
-     * @description Grants access to freelancer documents.
-     * @path /freelancers/{freelancerId}
-     * @allow (read) Anyone can read a freelancer document.
-     * @allow (create, update, delete) No one can create, update or delete a freelancer
-     * @deny (create, update, delete) No one can create, update, or delete freelancers.
-     * @principle Public read access, owner-only writes (not implemented due to missing ownership field).
-     */
-    match /freelancers/{freelancerId} {
-      allow get, list: if true;
-      allow create, update, delete: if false; // TODO: Add owner validation once the schema is updated with an ownership field.
-    }
-
-    /**
-     * @description Grants access to projects within a startup.
-     * @path /startups/{startupId}/projects/{projectId}
-     * @allow (read) Anyone can read a project within a startup.
-     * @allow (create, update, delete) No one can create, update or delete a project
-     * @deny (create, update, delete) No one can create, update, or delete projects.
-     * @principle Public read access, owner-only writes (not implemented due to missing ownership field).
-     */
-    match /startups/{startupId}/projects/{projectId} {
-      allow get, list: if true;
-      allow create, update, delete: if false; // TODO: Add owner validation once the schema is updated with an ownership field.
-    }
-
-    /**
-     * @description Grants access to user documents.
+     * @description Grants the owner full access to their own user document.
      * @path /users/{userId}
-     * @allow (create) A user can create their own document.
-     * @allow (get, list) Anyone can read a user's document.
-     * @allow (update, delete) A user can update and delete their own document.
-     * @deny (create) A user cannot create a document with an ID that does not match their own.
-     * @deny (update, delete) A user cannot update or delete another user's document.
-     * @principle Enforces document ownership for writes, public read access.
-     */
-    match /users/{userId} {
-      allow get, list: if true;
-      allow create: if isSignedIn() && request.auth.uid == userId;
-      allow update, delete: if isSignedIn() && request.auth.uid == userId && resource != null;
-    }
-
-    /**
-     * @description Grants access to posts within a user's profile.
-     * @path /users/{userId}/posts/{postId}
-     * @allow (read, list) Anyone can read and list a user's posts.
-     * @allow (create) A user can create a post in their own profile.
-     * @allow (update, delete) A user can update and delete their own posts.
-     * @deny (create) A user cannot create a post in another user's profile.
-     * @deny (update, delete) A user cannot update or delete another user's posts.
-     * @principle Enforces document ownership for writes, public read access.
-     */
-    match /users/{userId}/posts/{postId} {
-      allow get, list: if true;
-      allow create: if isSignedIn() && request.auth.uid == userId;
-      allow update, delete: if isSignedIn() && request.auth.uid == userId && resource != null;
-    }
-
-    /**
-     * @description Grants access to company documents.
-     * @path /companies/{companyId}
-     * @allow (read) Anyone can read a company's document.
-     * @allow (create, update, delete) No one can create, update or delete a company
-     * @deny (create, update, delete) No one can create, update, or delete companies.
-     * @principle Public read access, owner-only writes (not implemented due to missing ownership field).
-     */
-    match /companies/{companyId} {
-      allow get, list: if true;
-      allow create, update, delete: if false; // TODO: Add owner validation once the schema is updated with an ownership field.
-    }
-
-    /**
-     * @description Grants access to tickets within a company.
-     * @path /companies/{companyId}/tickets/{ticketId}
-     * @allow (read) Anyone can read a ticket within a company.
-     * @allow (create, update, delete) No one can create, update or delete a ticket
-     * @deny (create, update, delete) No one can create, update, or delete tickets.
-     * @principle Public read access, owner-only writes (not implemented due to missing ownership field).
-     */
-    match /companies/{companyId}/tickets/{ticketId} {
-      allow get, list: if true;
-      allow create, update, delete: if false; // TODO: Add owner validation once the schema is updated with an ownership field.
-    }
-
-    /**
-     * @description Grants access to team members within a company.
-     * @path /companies/{companyId}/teamMembers/{teamMemberId}
-     * @allow (read) Anyone can read a team member within a company.
-     * @allow (create, update, delete) No one can create, update or delete a team member
-     * @deny (create, update, delete) No one can create, update, or delete team members.
-     * @principle Public read access, owner-only writes (not implemented due to missing ownership field).
-     */
-    match /companies/{companyId}/teamMembers/{teamMemberId} {
-      allow get, list: if true;
-      allow create, update, delete: if false; // TODO: Add owner validation once the schema is updated with an ownership field.
-    }
-
-    /**
-     * @description Grants access to user-specific signals.
-     * @path /users/{userId}/signals/{signalId}
-     * @allow (get, list) A user can read and list their own signals.
-     * @allow (create) A user can create their own signals.
-     * @allow (update, delete) A user can update and delete their own signals.
-     * @deny (create) A user cannot create a signal for another user.
-     * @deny (update, delete) A user cannot update or delete another user's signal.
+     * @allow (create) - Authenticated user with UID matching the userId can create their user document.
+     * @allow (get, list, update, delete) - Authenticated user with UID matching the userId can read, update, and delete their user document.
+     * @deny (create) - Authenticated user attempts to create a user document with a userId that doesn't match their UID.
+     * @deny (get, list, update, delete) - Authenticated user attempts to read, update, or delete another user's document.
      * @principle Enforces document ownership for writes.
      */
-    match /users/{userId}/signals/{signalId} {
-      allow get, list: if isOwner(userId);
-      allow create: if isSignedIn() && request.auth.uid == userId;
-      allow update, delete: if isSignedIn() && request.auth.uid == userId && resource != null;
+    match /users/{userId} {
+      function isSignedIn() {
+        return request.auth != null;
+      }
+      function isOwner(userId) {
+        return request.auth.uid == userId;
+      }
+      function isExistingOwner(userId) {
+        return isOwner(userId) && resource.data != null;
+      }
+
+      allow get: if isSignedIn() && isOwner(userId);
+      allow list: if false;
+      allow create: if isSignedIn() && isOwner(userId);
+      allow update: if isSignedIn() && isOwner(userId);
+      allow delete: if isSignedIn() && isOwner(userId);
     }
 
     /**
-     * @description Grants access to startup-specific signals.
+     * @description Grants the owner full access to their own posts.
+     * @path /users/{userId}/posts/{postId}
+     * @allow (create) - Authenticated user with UID matching the userId can create a post in their user document.
+     * @allow (get, list, update, delete) - Authenticated user with UID matching the userId can read, update, and delete their own posts.
+     * @deny (create) - Authenticated user attempts to create a post with a userId that doesn't match their UID.
+     * @deny (get, list, update, or delete) - Authenticated user attempts to read, update, or delete another user's posts.
+     * @principle Enforces document ownership for writes and restricts access to a user's own data tree.
+     */
+    match /users/{userId}/posts/{postId} {
+      function isSignedIn() {
+        return request.auth != null;
+      }
+      function isOwner(userId) {
+        return request.auth.uid == userId;
+      }
+      function isExistingOwner(userId) {
+        return isOwner(userId) && resource.data != null;
+      }
+
+      allow get: if isSignedIn() && isOwner(userId);
+      allow list: if isSignedIn() && isOwner(userId);
+      allow create: if isSignedIn() && isOwner(userId);
+      allow update: if isSignedIn() && isOwner(userId);
+      allow delete: if isSignedIn() && isOwner(userId);
+    }
+
+    /**
+     * @description Grants the owner full access to their own signals.
+     * @path /users/{userId}/signals/{signalId}
+     * @allow (create) - Authenticated user with UID matching the userId can create a signal in their user document.
+     * @allow (get, list, update, delete) - Authenticated user with UID matching the userId can read, update, and delete their own signals.
+     * @deny (create) - Authenticated user attempts to create a signal with a userId that doesn't match their UID.
+     * @deny (get, list, update, or delete) - Authenticated user attempts to read, update, or delete another user's signals.
+     * @principle Enforces document ownership for writes and restricts access to a user's own data tree.
+     */
+    match /users/{userId}/signals/{signalId} {
+      function isSignedIn() {
+        return request.auth != null;
+      }
+      function isOwner(userId) {
+        return request.auth.uid == userId;
+      }
+       function isExistingOwner(userId) {
+        return isOwner(userId) && resource.data != null;
+      }
+
+      allow get: if isSignedIn() && isOwner(userId);
+      allow list: if isSignedIn() && isOwner(userId);
+      allow create: if isSignedIn() && isOwner(userId);
+      allow update: if isSignedIn() && isOwner(userId);
+      allow delete: if isSignedIn() && isOwner(userId);
+    }
+
+    /**
+     * @description Allows public read access to courses, but restricts write access.
+     * @path /courses/{courseId}
+     * @allow (get, list) - Any user, authenticated or not, can read the course data.
+     * @deny (create, update, delete) - No user can create, update, or delete courses. Write operations are not allowed in this prototype.
+     * @principle Allows public read access with no write access (read-only collection).
+     */
+    match /courses/{courseId} {
+      allow get: if true;
+      allow list: if true;
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    /**
+     * @description Grants read access to startups to anyone, but restricts write access to only authenticated users.
+     * @path /startups/{startupId}
+     * @allow (get, list) - Any user, authenticated or not, can read the startup data.
+     * @allow (create) - Only authenticated users can create a startup with the ID matching their UID.
+     * @allow (update, delete) - Only the owner of the startup can update or delete it.
+     * @deny (create) - Authenticated user attempts to create a startup with an ID that doesn't match their UID.
+     * @deny (update, delete) - Authenticated user attempts to update or delete a startup they don't own.
+     * @principle Enforces document ownership for writes.
+     */
+    match /startups/{startupId} {
+      function isSignedIn() {
+        return request.auth != null;
+      }
+      function isOwner(startupId) {
+        return request.auth.uid == startupId;
+      }
+      function isExistingOwner(startupId) {
+        return isOwner(startupId) && resource.data != null;
+      }
+
+      allow get: if true;
+      allow list: if true;
+      allow create: if isSignedIn() && request.auth.uid == startupId;
+      allow update: if isSignedIn() && isOwner(startupId);
+      allow delete: if isSignedIn() && isOwner(startupId);
+    }
+
+    /**
+     * @description Grants access to milestones based on startup ownership.
+     * @path /startups/{startupId}/milestones/{milestoneId}
+     * @allow (get, list) - Any user can read milestones.
+     * @allow (create) - Only the owner of the startup can create a milestone.
+     * @allow (update, delete) - Only the owner of the startup can update or delete a milestone.
+     * @deny (create) - Authenticated user attempts to create a milestone for a startup they don't own.
+     * @deny (update, delete) - Authenticated user attempts to update or delete a milestone for a startup they don't own.
+     * @principle Enforces document ownership for writes.
+     */
+    match /startups/{startupId}/milestones/{milestoneId} {
+      function isSignedIn() {
+        return request.auth != null;
+      }
+      function isOwner(startupId) {
+        return get(/databases/$(database)/documents/startups/$(startupId)).data.uid == request.auth.uid;
+      }
+      function isExistingOwner(startupId) {
+        return isOwner(startupId) && resource.data != null;
+      }
+
+      allow get: if true;
+      allow list: if true;
+      allow create: if isSignedIn() && isOwner(startupId);
+      allow update: if isSignedIn() && isOwner(startupId);
+      allow delete: if isSignedIn() && isOwner(startupId);
+    }
+
+    /**
+     * @description Grants access to projects based on startup ownership.
+     * @path /startups/{startupId}/projects/{projectId}
+     * @allow (get, list) - Any user can read the project data.
+     * @allow (create) - Only the owner of the startup can create a project.
+     * @allow (update, delete) - Only the owner of the startup can update or delete a project.
+     * @deny (create) - Authenticated user attempts to create a project for a startup they don't own.
+     * @deny (update, delete) - Authenticated user attempts to update or delete a project for a startup they don't own.
+     * @principle Enforces document ownership for writes.
+     */
+    match /startups/{startupId}/projects/{projectId} {
+      function isSignedIn() {
+        return request.auth != null;
+      }
+     function isOwner(startupId) {
+        return get(/databases/$(database)/documents/startups/$(startupId)).data.uid == request.auth.uid;
+      }
+      function isExistingOwner(startupId) {
+        return isOwner(startupId) && resource.data != null;
+      }
+
+      allow get: if true;
+      allow list: if true;
+      allow create: if isSignedIn() && isOwner(startupId);
+      allow update: if isSignedIn() && isOwner(startupId);
+      allow delete: if isSignedIn() && isOwner(startupId);
+    }
+
+    /**
+     * @description Enforces role-based access control for startup-specific signals.
      * @path /startups/{startupId}/signals/{signalId}
-     * @allow (get, list) Anyone can read and list a startup's signals.
-     * @allow (create, update, delete) No one can create, update or delete a startup's signal
-     * @deny (create, update, delete) No one can create, update, or delete startup signals.
+     * @allow (get, list) - Allow anyone with the `startupMembers` role
+     * @allow (create, update, delete) - Only users with the 'admin' role in the startupMembers map can modify signals.
+     * @deny (create, update, delete) - Users without 'admin' role attempting to modify startup signals.
+     * @principle Role-based access control using a `startupMembers` map.
      */
     match /startups/{startupId}/signals/{signalId} {
-      allow get, list: if true; // TODO: Should be restricted to startup memebrs
-      allow create, update, delete: if false; // TODO: Add owner validation once the schema is updated with an ownership field.
+        function isSignedIn() {
+          return request.auth != null;
+        }
+        function isStartupMember(startupId) {
+          return get(/databases/$(database)/documents/startups/$(startupId)).data.members[request.auth.uid] != null;
+        }
+        function isAdmin(startupId) {
+          return get(/databases/$(database)/documents/startups/$(startupId)).data.members[request.auth.uid] == 'admin';
+        }
+        function isExistingStartupMember(startupId) {
+            return isStartupMember(startupId) && resource.data != null;
+        }
+      allow get: if isSignedIn() && isStartupMember(startupId);
+      allow list: if isSignedIn() && isStartupMember(startupId);
+      allow create: if isSignedIn() && isAdmin(startupId);
+      allow update: if isSignedIn() && isAdmin(startupId);
+      allow delete: if isSignedIn() && isAdmin(startupId);
     }
 
-    // Global helper functions
-    function isSignedIn() {
-      return request.auth != null;
+    /**
+     * @description Allows public read access to freelancers, but restricts write access.
+     * @path /freelancers/{freelancerId}
+     * @allow (get, list) - Any user, authenticated or not, can read the freelancer data.
+     * @deny (create, update, delete) - No user can create, update, or delete freelancers. Write operations are not allowed in this prototype.
+     * @principle Allows public read access with no write access (read-only collection).
+     */
+    match /freelancers/{freelancerId} {
+      allow get: if true;
+      allow list: if true;
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
     }
 
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+     /**
+      * @description Grants read access to companies to anyone, but restricts write access to only authenticated users.
+      * @path /companies/{companyId}
+      * @allow (get, list) - Any user, authenticated or not, can read the company data.
+      * @allow (create) - Only authenticated users can create a company with the ID matching their UID.
+      * @allow (update, delete) - Only the owner of the company can update or delete it.
+      * @deny (create) - Authenticated user attempts to create a company with an ID that doesn't match their UID.
+      * @deny (update, delete) - Authenticated user attempts to update or delete a company they don't own.
+      * @principle Enforces document ownership for writes.
+      */
+    match /companies/{companyId} {
+        function isSignedIn() {
+          return request.auth != null;
+        }
+        function isOwner(companyId) {
+          return request.auth.uid == companyId;
+        }
+        function isExistingOwner(companyId) {
+            return isOwner(companyId) && resource.data != null;
+        }
+
+        allow get: if true;
+        allow list: if true;
+        allow create: if isSignedIn() && request.auth.uid == companyId;
+        allow update: if isSignedIn() && isOwner(companyId);
+        allow delete: if isSignedIn() && isOwner(companyId);
+    }
+
+    /**
+     * @description Grants access to tickets based on company ownership.
+     * @path /companies/{companyId}/tickets/{ticketId}
+     * @allow (get, list) - Any user can read the ticket data.
+     * @allow (create) - Only the owner of the company can create a ticket.
+     * @allow (update, delete) - Only the owner of the company can update or delete a ticket.
+     * @deny (create) - Authenticated user attempts to create a ticket for a company they don't own.
+     * @deny (update, delete) - Authenticated user attempts to update or delete a ticket for a company they don't own.
+     * @principle Enforces document ownership for writes.
+     */
+    match /companies/{companyId}/tickets/{ticketId} {
+        function isSignedIn() {
+          return request.auth != null;
+        }
+       function isOwner(companyId) {
+        return get(/databases/$(database)/documents/companies/$(companyId)).data.uid == request.auth.uid;
+      }
+        function isExistingOwner(companyId) {
+            return isOwner(companyId) && resource.data != null;
+        }
+
+        allow get: if true;
+        allow list: if true;
+        allow create: if isSignedIn() && isOwner(companyId);
+        allow update: if isSignedIn() && isOwner(companyId);
+        allow delete: if isSignedIn() && isOwner(companyId);
+    }
+
+    /**
+     * @description Grants access to team members based on company ownership.
+     * @path /companies/{companyId}/teamMembers/{teamMemberId}
+     * @allow (get, list) - Any user can read the team member data.
+     * @allow (create) - Only the owner of the company can create a team member.
+     * @allow (update, delete) - Only the owner of the company can update or delete a team member.
+     * @deny (create) - Authenticated user attempts to create a team member for a company they don't own.
+     * @deny (update, delete) - Authenticated user attempts to update or delete a team member for a company they don't own.
+     * @principle Enforces document ownership for writes.
+     */
+    match /companies/{companyId}/teamMembers/{teamMemberId} {
+        function isSignedIn() {
+          return request.auth != null;
+        }
+        function isOwner(companyId) {
+          return get(/databases/$(database)/documents/companies/$(companyId)).data.uid == request.auth.uid;
+        }
+        function isExistingOwner(companyId) {
+            return isOwner(companyId) && resource.data != null;
+        }
+
+        allow get: if true;
+        allow list: if true;
+        allow create: if isSignedIn() && isOwner(companyId);
+        allow update: if isSignedIn() && isOwner(companyId);
+        allow delete: if isSignedIn() && isOwner(companyId);
     }
   }
 }
