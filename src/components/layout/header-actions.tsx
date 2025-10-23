@@ -32,6 +32,8 @@ import { formatDistanceToNow } from 'date-fns';
 import { ThemeToggle } from './theme-toggle';
 import { useNotificationSound } from '@/hooks/use-notification-sound';
 import { cn } from '@/lib/utils';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError, type SecurityRuleContext } from '@/firebase/errors';
 
 
 interface Notification {
@@ -84,58 +86,67 @@ export function HeaderActions() {
         
         const q = query(collection(db, "notifications"), where("recipientId", "==", user.uid), orderBy("createdAt", "desc"));
         
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            // Play sound only for new documents after the initial load
-            if (!isInitialNotificationsLoad.current && snapshot.docChanges().some(change => change.type === 'added')) {
-                playNotificationSound();
-            }
-
-            const fetchedNotifications = snapshot.docs.map(doc => {
-                const data = doc.data();
-                const id = doc.id;
-                const createdAt = data.createdAt?.toDate();
-                
-                let text = '';
-                let href = '#';
-                
-                switch (data.type) {
-                    case 'like':
-                        text = `${data.actorName} liked your post.`;
-                        href = `/sound-sphere?tab=feed#post-${data.entityId}`;
-                        break;
-                    case 'comment':
-                        text = `${data.actorName} commented on your post.`;
-                        href = `/sound-sphere?tab=feed&viewComments=${data.entityId}#comment-${data.secondaryEntityId}`;
-                        break;
-                    case 'reply':
-                        text = `${data.actorName} replied to your comment.`;
-                        href = `/sound-sphere?tab=feed&viewComments=${data.entityId}#comment-${data.secondaryEntityId}`;
-                        break;
-                    case 'follow':
-                        text = `${data.actorName} started following you.`;
-                        href = `/profile/${data.actorId}`;
-                        break;
-                    default:
-                        text = 'You have a new notification.';
+        const unsubscribe = onSnapshot(q, 
+            (snapshot) => {
+                // Play sound only for new documents after the initial load
+                if (!isInitialNotificationsLoad.current && snapshot.docChanges().some(change => change.type === 'added')) {
+                    playNotificationSound();
                 }
+
+                const fetchedNotifications = snapshot.docs.map(doc => {
+                    const data = doc.data();
+                    const id = doc.id;
+                    const createdAt = data.createdAt?.toDate();
+                    
+                    let text = '';
+                    let href = '#';
+                    
+                    switch (data.type) {
+                        case 'like':
+                            text = `${data.actorName} liked your post.`;
+                            href = `/sound-sphere?tab=feed#post-${data.entityId}`;
+                            break;
+                        case 'comment':
+                            text = `${data.actorName} commented on your post.`;
+                            href = `/sound-sphere?tab=feed&viewComments=${data.entityId}#comment-${data.secondaryEntityId}`;
+                            break;
+                        case 'reply':
+                            text = `${data.actorName} replied to your comment.`;
+                            href = `/sound-sphere?tab=feed&viewComments=${data.entityId}#comment-${data.secondaryEntityId}`;
+                            break;
+                        case 'follow':
+                            text = `${data.actorName} started following you.`;
+                            href = `/profile/${data.actorId}`;
+                            break;
+                        default:
+                            text = 'You have a new notification.';
+                    }
+                    
+                    return {
+                        id,
+                        ...data,
+                        text,
+                        href,
+                        time: createdAt ? formatDistanceToNow(createdAt, { addSuffix: true }) : 'just now'
+                    } as Notification;
+                });
                 
-                return {
-                    id,
-                    ...data,
-                    text,
-                    href,
-                    time: createdAt ? formatDistanceToNow(createdAt, { addSuffix: true }) : 'just now'
-                } as Notification;
-            });
-            
-            setNotifications(fetchedNotifications);
-            setHasUnread(fetchedNotifications.some(n => !n.read));
-            
-            // Mark initial load as complete
-            if (isInitialNotificationsLoad.current) {
-                isInitialNotificationsLoad.current = false;
+                setNotifications(fetchedNotifications);
+                setHasUnread(fetchedNotifications.some(n => !n.read));
+                
+                // Mark initial load as complete
+                if (isInitialNotificationsLoad.current) {
+                    isInitialNotificationsLoad.current = false;
+                }
+            },
+            async (error) => {
+                const permissionError = new FirestorePermissionError({
+                    path: `/notifications`,
+                    operation: 'list',
+                } satisfies SecurityRuleContext);
+                errorEmitter.emit('permission-error', permissionError);
             }
-        });
+        );
 
         return () => unsubscribe();
     }, [user, playNotificationSound]);
@@ -191,7 +202,8 @@ export function HeaderActions() {
                 const user = userCredential.user;
                 await updateProfile(user, { displayName: `${firstName} ${lastName}` });
                 
-                await setDoc(doc(db, "users", user.uid), {
+                const docRef = doc(db, "users", user.uid);
+                const data = {
                     uid: user.uid,
                     email: user.email,
                     firstName,
@@ -201,6 +213,14 @@ export function HeaderActions() {
                     is_admin: false,
                     photoURL: null,
                     bio: '',
+                };
+                setDoc(docRef, data).catch(async (error) => {
+                    const permissionError = new FirestorePermissionError({
+                        path: docRef.path,
+                        operation: 'create',
+                        requestResourceData: data,
+                    } satisfies SecurityRuleContext);
+                    errorEmitter.emit('permission-error', permissionError);
                 });
                 toast({ title: "Success", description: "Account created successfully!"});
 
@@ -248,7 +268,7 @@ export function HeaderActions() {
 
             if (!userDocSnap.exists()) {
                 // Create a new user document if it's their first time
-                await setDoc(userDocRef, {
+                 const data = {
                     uid: user.uid,
                     email: user.email,
                     firstName: user.displayName?.split(' ')[0] || '',
@@ -258,6 +278,14 @@ export function HeaderActions() {
                     is_admin: false,
                     photoURL: user.photoURL || null,
                     bio: '',
+                };
+                setDoc(userDocRef, data).catch(async (error) => {
+                    const permissionError = new FirestorePermissionError({
+                        path: userDocRef.path,
+                        operation: 'create',
+                        requestResourceData: data,
+                    } satisfies SecurityRuleContext);
+                    errorEmitter.emit('permission-error', permissionError);
                 });
             }
             toast({ title: "Success", description: "Logged in with Google successfully!"});

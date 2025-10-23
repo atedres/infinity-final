@@ -25,6 +25,9 @@ import { useNotificationSound } from '@/hooks/use-notification-sound';
 import { ToastAction } from "@/components/ui/toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError, type SecurityRuleContext } from '@/firebase/errors';
+
 
 // Interfaces for our data structures
 // Chat interfaces
@@ -223,8 +226,15 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
     
     const sendSignal = async (to: string, chatId: string, signal: any, type: 'p2p-call' | 'room-offer' | 'room-answer') => {
         if (!db || !currentUser) return;
-        await addDoc(collection(db, "signals"), {
+        addDoc(collection(db, "signals"), {
             from: currentUser.uid, fromName: currentUser.displayName, fromAvatar: currentUser.photoURL, to, chatId, signal: JSON.stringify(signal), type
+        }).catch(async (serverError: any) => {
+            const permissionError = new FirestorePermissionError({
+              path: `/signals`,
+              operation: 'create',
+              requestResourceData: { to, type },
+            } satisfies SecurityRuleContext);
+            errorEmitter.emit('permission-error', permissionError);
         });
     };
 
@@ -263,47 +273,92 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
 
 
             const unsubs: (() => void)[] = [];
-            unsubs.push(onSnapshot(roomDocRef, (docSnap) => {
-                if(docSnap.exists()) {
-                    setRoomData({ id: docSnap.id, ...docSnap.data() } as Room)
-                } else {
-                    if (roomUnsubscribes.current.length > 0) {
-                        toast({ title: "Room Ended", description: "The host has ended the room." });
-                        cleanupAndResetLocalState(true);
-                    }
-                }
-            }));
-            unsubs.push(onSnapshot(collection(db, "audioRooms", roomId, "participants"), (snapshot) => {
-                const newParticipants = snapshot.docs.map(p => ({ id: p.id, ...p.data() } as Participant));
-                setParticipants(newParticipants);
-                
-                // --- New Robust Connection Logic ---
-                newParticipants.forEach(p => {
-                    if (p.id !== currentUser.uid && !roomPeersRef.current[p.id] && roomLocalStreamRef.current) {
-                        // The user with the greater ID initiates the connection.
-                        if (currentUser.uid > p.id) {
-                            const peer = new Peer({ initiator: true, stream: roomLocalStreamRef.current, trickle: false, config: { iceServers } });
-                            peer.on('signal', offer => sendSignal(p.id, roomId, offer, 'room-offer'));
-                            peer.on('stream', stream => setRoomRemoteStreams(prev => [...prev.filter(s => s.peerId !== p.id), { peerId: p.id, stream }]));
-                            peer.on('close', () => setRoomRemoteStreams(prev => prev.filter(s => s.peerId !== p.id)));
-                            peer.on('error', (err) => { console.error(`Peer error with ${p.id}:`, err); roomPeersRef.current[p.id]?.destroy(); delete roomPeersRef.current[p.id]; });
-                            roomPeersRef.current[p.id] = peer;
+            unsubs.push(onSnapshot(roomDocRef, 
+                (docSnap) => {
+                    if(docSnap.exists()) {
+                        setRoomData({ id: docSnap.id, ...docSnap.data() } as Room)
+                    } else {
+                        if (roomUnsubscribes.current.length > 0) {
+                            toast({ title: "Room Ended", description: "The host has ended the room." });
+                            cleanupAndResetLocalState(true);
                         }
                     }
-                });
-                
-                // Clean up peers for users who have left
-                Object.keys(roomPeersRef.current).forEach(peerId => {
-                    if (!newParticipants.some(p => p.id === peerId)) {
-                        roomPeersRef.current[peerId]?.destroy();
-                        delete roomPeersRef.current[peerId];
-                        setRoomRemoteStreams(prev => prev.filter(s => s.peerId !== peerId));
-                    }
-                });
-            }));
-            unsubs.push(onSnapshot(collection(db, "audioRooms", roomId, "requests"), s => setSpeakingRequests(s.docs.map(d => ({ id: d.id, ...d.data() } as SpeakRequest)))));
-            unsubs.push(onSnapshot(query(collection(db, "audioRooms", roomId, "chatMessages"), orderBy("createdAt", "asc")), s => setRoomChatMessages(s.docs.map(d => ({ id: d.id, ...d.data() } as RoomChatMessage)))));
-            unsubs.push(onSnapshot(doc(db, "audioRooms", roomId, "invitations", currentUser.uid), d => setSpeakerInvitation(d.exists() ? d.data() as SpeakerInvitation : null)));
+                },
+                async (error) => {
+                    const permissionError = new FirestorePermissionError({
+                      path: roomDocRef.path,
+                      operation: 'get',
+                    } satisfies SecurityRuleContext);
+                    errorEmitter.emit('permission-error', permissionError);
+                }
+            ));
+            unsubs.push(onSnapshot(collection(db, "audioRooms", roomId, "participants"), 
+                (snapshot) => {
+                    const newParticipants = snapshot.docs.map(p => ({ id: p.id, ...p.data() } as Participant));
+                    setParticipants(newParticipants);
+                    
+                    // --- New Robust Connection Logic ---
+                    newParticipants.forEach(p => {
+                        if (p.id !== currentUser.uid && !roomPeersRef.current[p.id] && roomLocalStreamRef.current) {
+                            // The user with the greater ID initiates the connection.
+                            if (currentUser.uid > p.id) {
+                                const peer = new Peer({ initiator: true, stream: roomLocalStreamRef.current, trickle: false, config: { iceServers } });
+                                peer.on('signal', offer => sendSignal(p.id, roomId, offer, 'room-offer'));
+                                peer.on('stream', stream => setRoomRemoteStreams(prev => [...prev.filter(s => s.peerId !== p.id), { peerId: p.id, stream }]));
+                                peer.on('close', () => setRoomRemoteStreams(prev => prev.filter(s => s.peerId !== p.id)));
+                                peer.on('error', (err) => { console.error(`Peer error with ${p.id}:`, err); roomPeersRef.current[p.id]?.destroy(); delete roomPeersRef.current[p.id]; });
+                                roomPeersRef.current[p.id] = peer;
+                            }
+                        }
+                    });
+                    
+                    // Clean up peers for users who have left
+                    Object.keys(roomPeersRef.current).forEach(peerId => {
+                        if (!newParticipants.some(p => p.id === peerId)) {
+                            roomPeersRef.current[peerId]?.destroy();
+                            delete roomPeersRef.current[peerId];
+                            setRoomRemoteStreams(prev => prev.filter(s => s.peerId !== peerId));
+                        }
+                    });
+                },
+                async (error) => {
+                    const permissionError = new FirestorePermissionError({
+                        path: `/audioRooms/${roomId}/participants`,
+                        operation: 'list',
+                    } satisfies SecurityRuleContext);
+                    errorEmitter.emit('permission-error', permissionError);
+                }
+            ));
+            unsubs.push(onSnapshot(collection(db, "audioRooms", roomId, "requests"), 
+                s => setSpeakingRequests(s.docs.map(d => ({ id: d.id, ...d.data() } as SpeakRequest))),
+                async (error) => {
+                    const permissionError = new FirestorePermissionError({
+                        path: `/audioRooms/${roomId}/requests`,
+                        operation: 'list',
+                    } satisfies SecurityRuleContext);
+                    errorEmitter.emit('permission-error', permissionError);
+                }
+            ));
+            unsubs.push(onSnapshot(query(collection(db, "audioRooms", roomId, "chatMessages"), orderBy("createdAt", "asc")), 
+                s => setRoomChatMessages(s.docs.map(d => ({ id: d.id, ...d.data() } as RoomChatMessage))),
+                async (error) => {
+                    const permissionError = new FirestorePermissionError({
+                        path: `/audioRooms/${roomId}/chatMessages`,
+                        operation: 'list',
+                    } satisfies SecurityRuleContext);
+                    errorEmitter.emit('permission-error', permissionError);
+                }
+            ));
+            unsubs.push(onSnapshot(doc(db, "audioRooms", roomId, "invitations", currentUser.uid), 
+                d => setSpeakerInvitation(d.exists() ? d.data() as SpeakerInvitation : null),
+                async (error) => {
+                    const permissionError = new FirestorePermissionError({
+                        path: `/audioRooms/${roomId}/invitations/${currentUser.uid}`,
+                        operation: 'get',
+                    } satisfies SecurityRuleContext);
+                    errorEmitter.emit('permission-error', permissionError);
+                }
+            ));
             getDoc(doc(db, "audioRooms", roomId, "requests", currentUser.uid)).then(snap => setHasRequested(snap.exists()));
             roomUnsubscribes.current = unsubs;
         } catch (err) {
@@ -348,54 +403,118 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
     }, [currentRoomId, currentUser, db, toast, cleanupAndResetLocalState]);
 
     const toggleMute = async () => {
-        if (!roomLocalStreamRef.current || !currentUser || !currentRoomId) return;
+        if (!roomLocalStreamRef.current || !currentUser || !currentRoomId || !db) return;
         const newMutedState = !roomIsMuted;
         roomLocalStreamRef.current.getAudioTracks().forEach(track => track.enabled = !newMutedState);
         setRoomIsMuted(newMutedState);
-        await updateDoc(doc(db, "audioRooms", currentRoomId, "participants", currentUser.uid), { isMuted: newMutedState });
+        const docRef = doc(db, "audioRooms", currentRoomId, "participants", currentUser.uid);
+        updateDoc(docRef, { isMuted: newMutedState }).catch(async (error) => {
+            const permissionError = new FirestorePermissionError({
+                path: docRef.path,
+                operation: 'update',
+                requestResourceData: { isMuted: newMutedState },
+            } satisfies SecurityRuleContext);
+            errorEmitter.emit('permission-error', permissionError);
+        });
     };
     const requestToSpeak = async () => {
-        if (!currentUser || !currentRoomId) return;
-        await setDoc(doc(db, "audioRooms", currentRoomId, "requests", currentUser.uid), { name: currentUser.displayName, avatar: currentUser.photoURL });
+        if (!currentUser || !currentRoomId || !db) return;
+        const docRef = doc(db, "audioRooms", currentRoomId, "requests", currentUser.uid);
+        const data = { name: currentUser.displayName, avatar: currentUser.photoURL };
+        setDoc(docRef, data).catch(async (error) => {
+            const permissionError = new FirestorePermissionError({
+                path: docRef.path,
+                operation: 'create',
+                requestResourceData: data,
+            } satisfies SecurityRuleContext);
+            errorEmitter.emit('permission-error', permissionError);
+        });
         setHasRequested(true); toast({ title: "Request Sent" });
     };
     const manageRequest = async (requesterId: string, accept: boolean) => {
-        if (!currentRoomId || !currentUser) return;
-        await deleteDoc(doc(db, "audioRooms", currentRoomId, "requests", requesterId));
-        if (accept) { await setDoc(doc(db, "audioRooms", currentRoomId, "invitations", requesterId), { inviterId: currentUser.uid, inviterName: currentUser.displayName }); }
+        if (!currentRoomId || !currentUser || !db) return;
+        deleteDoc(doc(db, "audioRooms", currentRoomId, "requests", requesterId));
+        if (accept) { 
+            const docRef = doc(db, "audioRooms", currentRoomId, "invitations", requesterId);
+            const data = { inviterId: currentUser.uid, inviterName: currentUser.displayName };
+            setDoc(docRef, data).catch(async (error) => {
+                const permissionError = new FirestorePermissionError({
+                    path: docRef.path,
+                    operation: 'create',
+                    requestResourceData: data,
+                } satisfies SecurityRuleContext);
+                errorEmitter.emit('permission-error', permissionError);
+            });
+        }
     };
     const changeRole = async (targetId: string, newRole: 'moderator' | 'speaker' | 'listener') => {
-        if (!currentRoomId) return;
-        await updateDoc(doc(db, "audioRooms", currentRoomId, "participants", targetId), { role: newRole, isMuted: newRole === 'listener' });
+        if (!currentRoomId || !db) return;
+        const docRef = doc(db, "audioRooms", currentRoomId, "participants", targetId);
+        const data = { role: newRole, isMuted: newRole === 'listener' };
+        updateDoc(docRef, data).catch(async (error) => {
+            const permissionError = new FirestorePermissionError({
+                path: docRef.path,
+                operation: 'update',
+                requestResourceData: data,
+            } satisfies SecurityRuleContext);
+            errorEmitter.emit('permission-error', permissionError);
+        });
         toast({ title: "Role Updated" });
     };
     const acceptInvite = async () => {
-        if (!currentUser || !currentRoomId) return;
-        await updateDoc(doc(db, "audioRooms", currentRoomId, "participants", currentUser.uid), { role: 'speaker', isMuted: false });
-        await deleteDoc(doc(db, "audioRooms", currentRoomId, "invitations", currentUser.uid));
+        if (!currentUser || !currentRoomId || !db) return;
+        const docRef = doc(db, "audioRooms", currentRoomId, "participants", currentUser.uid);
+        const data = { role: 'speaker', isMuted: false };
+        updateDoc(docRef, data).catch(async (error) => {
+            const permissionError = new FirestorePermissionError({
+                path: docRef.path,
+                operation: 'update',
+                requestResourceData: data,
+            } satisfies SecurityRuleContext);
+            errorEmitter.emit('permission-error', permissionError);
+        });
+        deleteDoc(doc(db, "audioRooms", currentRoomId, "invitations", currentUser.uid));
         setRoomIsMuted(false);
         if (roomLocalStreamRef.current) roomLocalStreamRef.current.getAudioTracks().forEach(t => t.enabled = true);
         toast({ title: "You are now a speaker!" });
     };
-    const declineInvite = async () => { if (currentUser && currentRoomId) await deleteDoc(doc(db, "audioRooms", currentRoomId, "invitations", currentUser.uid)); };
+    const declineInvite = async () => { if (currentUser && currentRoomId && db) await deleteDoc(doc(db, "audioRooms", currentRoomId, "invitations", currentUser.uid)); };
     const removeUser = async (targetId: string) => {
-        if (!currentUser || !currentRoomId) return;
+        if (!currentUser || !currentRoomId || !db) return;
         const batch = writeBatch(db);
         batch.set(doc(db, "audioRooms", currentRoomId, "bannedUsers", targetId), { bannedAt: serverTimestamp(), bannedBy: currentUser.uid });
         batch.delete(doc(db, "audioRooms", currentRoomId, "participants", targetId));
         await batch.commit(); toast({ title: "User Banned" });
     };
     const selfPromoteToSpeaker = async () => {
-        if (!currentUser || !currentRoomId) return;
-        await updateDoc(doc(db, "audioRooms", currentRoomId, "participants", currentUser.uid), { role: 'speaker', isMuted: false });
+        if (!currentUser || !currentRoomId || !db) return;
+        const docRef = doc(db, "audioRooms", currentRoomId, "participants", currentUser.uid);
+        const data = { role: 'speaker', isMuted: false };
+        updateDoc(docRef, data).catch(async (error) => {
+             const permissionError = new FirestorePermissionError({
+                path: docRef.path,
+                operation: 'update',
+                requestResourceData: data,
+            } satisfies SecurityRuleContext);
+            errorEmitter.emit('permission-error', permissionError);
+        });
         setRoomIsMuted(false); if (roomLocalStreamRef.current) roomLocalStreamRef.current.getAudioTracks().forEach(t => t.enabled = true);
     };
-    const pinLink = async (url: string) => { if (currentRoomId) await updateDoc(doc(db, "audioRooms", currentRoomId), { pinnedLink: url }); toast({ title: "Link Pinned" }); };
-    const unpinLink = async () => { if (currentRoomId) await updateDoc(doc(db, "audioRooms", currentRoomId), { pinnedLink: deleteField() }); };
-    const updateRoomTitle = async (title: string) => { if (currentRoomId) await updateDoc(doc(db, "audioRooms", currentRoomId), { title }); };
+    const pinLink = async (url: string) => { if (currentRoomId && db) await updateDoc(doc(db, "audioRooms", currentRoomId), { pinnedLink: url }); toast({ title: "Link Pinned" }); };
+    const unpinLink = async () => { if (currentRoomId && db) await updateDoc(doc(db, "audioRooms", currentRoomId), { pinnedLink: deleteField() }); };
+    const updateRoomTitle = async (title: string) => { if (currentRoomId && db) await updateDoc(doc(db, "audioRooms", currentRoomId), { title }); };
     const sendChatMessage = async (text: string) => {
-        if (!currentUser || !currentRoomId || !text.trim()) return;
-        await addDoc(collection(db, "audioRooms", currentRoomId, "chatMessages"), { text, senderId: currentUser.uid, senderName: currentUser.displayName, senderAvatar: currentUser.photoURL, createdAt: serverTimestamp() });
+        if (!currentUser || !currentRoomId || !text.trim() || !db) return;
+        const docRef = collection(db, "audioRooms", currentRoomId, "chatMessages");
+        const data = { text, senderId: currentUser.uid, senderName: currentUser.displayName, senderAvatar: currentUser.photoURL, createdAt: serverTimestamp() };
+        addDoc(docRef, data).catch(async (error) => {
+            const permissionError = new FirestorePermissionError({
+                path: docRef.path,
+                operation: 'create',
+                requestResourceData: data,
+            } satisfies SecurityRuleContext);
+            errorEmitter.emit('permission-error', permissionError);
+        });
     };
     const handlePictureUpload = async (file: File) => {
         if (!storage || !currentUser || !db || !currentRoomId) return;
@@ -487,6 +606,12 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
                     await deleteDoc(change.doc.ref);
                 }
             });
+        }, async (error) => {
+            const permissionError = new FirestorePermissionError({
+                path: '/signals',
+                operation: 'list',
+            } satisfies SecurityRuleContext);
+            errorEmitter.emit('permission-error', permissionError);
         });
         return () => unsubscribe();
     }, [currentUser, toast, currentRoomId]);
@@ -506,12 +631,21 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
         const messagesRef = collection(db, 'chats', selectedChat.id, 'messages');
         const q = query(messagesRef, orderBy('timestamp', 'asc'));
     
-        messageListenerUnsubscribe.current = onSnapshot(q, (querySnapshot) => {
-          const chatMessages = querySnapshot.docs.map(
-            (doc) => ({ id: doc.id, ...doc.data() } as ChatMessage)
-          );
-          setMessages(chatMessages);
-        });
+        messageListenerUnsubscribe.current = onSnapshot(q, 
+            (querySnapshot) => {
+              const chatMessages = querySnapshot.docs.map(
+                (doc) => ({ id: doc.id, ...doc.data() } as ChatMessage)
+              );
+              setMessages(chatMessages);
+            },
+            async (error) => {
+                 const permissionError = new FirestorePermissionError({
+                    path: `/chats/${selectedChat.id}/messages`,
+                    operation: 'list',
+                } satisfies SecurityRuleContext);
+                errorEmitter.emit('permission-error', permissionError);
+            }
+        );
     
         return () => {
           if (messageListenerUnsubscribe.current) {
@@ -523,21 +657,30 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         if (!currentUser || !db) return;
         const chatsQuery = query(collection(db, "chats"), where("participants", "array-contains", currentUser.uid), orderBy("lastUpdate", "desc"));
-        const unsubscribe = onSnapshot(chatsQuery, async (snapshot) => {
-            if (isInitialChatsLoad.current) { isInitialChatsLoad.current = false; }
-            let unreadSum = 0;
-            const enrichedChats = await Promise.all(snapshot.docs.map(async (chatDoc) => {
-                const chat = { id: chatDoc.id, ...chatDoc.data() } as Chat;
-                const otherId = chat.participants.find(p => p !== currentUser.uid) || '';
-                const otherName = chat.participantNames?.[otherId] || 'User';
-                const unreadCount = chat.unreadCounts?.[currentUser.uid] || 0;
-                unreadSum += unreadCount;
-                const userDoc = await getDoc(doc(db, "users", otherId));
-                const otherAvatar = userDoc.exists() ? userDoc.data().photoURL || '' : '';
-                return { ...chat, otherParticipant: { id: otherId, name: otherName, avatar: otherAvatar }, unreadCount };
-            }));
-            setConversations(enrichedChats); setTotalUnread(unreadSum);
-        });
+        const unsubscribe = onSnapshot(chatsQuery, 
+            async (snapshot) => {
+                if (isInitialChatsLoad.current) { isInitialChatsLoad.current = false; }
+                let unreadSum = 0;
+                const enrichedChats = await Promise.all(snapshot.docs.map(async (chatDoc) => {
+                    const chat = { id: chatDoc.id, ...chatDoc.data() } as Chat;
+                    const otherId = chat.participants.find(p => p !== currentUser.uid) || '';
+                    const otherName = chat.participantNames?.[otherId] || 'User';
+                    const unreadCount = chat.unreadCounts?.[currentUser.uid] || 0;
+                    unreadSum += unreadCount;
+                    const userDoc = await getDoc(doc(db, "users", otherId));
+                    const otherAvatar = userDoc.exists() ? userDoc.data().photoURL || '' : '';
+                    return { ...chat, otherParticipant: { id: otherId, name: otherName, avatar: otherAvatar }, unreadCount };
+                }));
+                setConversations(enrichedChats); setTotalUnread(unreadSum);
+            },
+            async (error) => {
+                 const permissionError = new FirestorePermissionError({
+                    path: `/chats`,
+                    operation: 'list',
+                } satisfies SecurityRuleContext);
+                errorEmitter.emit('permission-error', permissionError);
+            }
+        );
         return () => unsubscribe();
     }, [currentUser]);
 
@@ -596,11 +739,31 @@ export function ChatLauncher({ children }: { children: React.ReactNode }) {
         const chatDocRef = doc(db, "chats", selectedChat.id); const newMessageRef = doc(collection(db, "chats", selectedChat.id, "messages"));
         const batch = writeBatch(db); batch.set(newMessageRef, { text: newMessage, senderId: currentUser.uid, timestamp: serverTimestamp(), });
         batch.set(chatDocRef, { lastMessage: newMessage, lastUpdate: serverTimestamp(), participants: selectedChat.participants, participantNames: selectedChat.participantNames, unreadCounts: { [otherId]: increment(1), [currentUser.uid]: 0, } }, { merge: true });
-        await batch.commit(); setNewMessage('');
+        
+        batch.commit().catch(async (error) => {
+            const permissionError = new FirestorePermissionError({
+                path: chatDocRef.path,
+                operation: 'update',
+                requestResourceData: { lastMessage: newMessage },
+            } satisfies SecurityRuleContext);
+            errorEmitter.emit('permission-error', permissionError);
+        });
+
+        setNewMessage('');
     };
     const handleSelectChat = async (chat: EnrichedChat) => {
         if (!currentUser || !db) return; setSelectedChat(chat);
-        if (chat.unreadCount > 0) { await setDoc(doc(db, "chats", chat.id), { unreadCounts: { [currentUser.uid]: 0 } }, { merge: true }); }
+        if (chat.unreadCount > 0) { 
+            const docRef = doc(db, "chats", chat.id);
+            setDoc(docRef, { unreadCounts: { [currentUser.uid]: 0 } }, { merge: true }).catch(async (error) => {
+                const permissionError = new FirestorePermissionError({
+                    path: docRef.path,
+                    operation: 'update',
+                    requestResourceData: { unreadCounts: { [currentUser.uid]: 0 } },
+                } satisfies SecurityRuleContext);
+                errorEmitter.emit('permission-error', permissionError);
+            });
+        }
     };
 
     useEffect(() => { if (!isChatSheetOpen) setSelectedChat(null); }, [isChatSheetOpen]);

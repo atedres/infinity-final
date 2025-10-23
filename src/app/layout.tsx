@@ -3,6 +3,8 @@ import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
 import { ChatLauncher } from '@/components/layout/chat-launcher';
 import { ThemeProvider } from '@/components/theme-provider';
+import { FirebaseErrorListener } from '@/components/FirebaseErrorListener';
+
 
 export const metadata: Metadata = {
   title: 'Infinity Hub',
@@ -32,6 +34,7 @@ export default function RootLayout({
             disableTransitionOnChange
         >
           <ChatLauncher>
+            {process.env.NODE_ENV === 'development' && <FirebaseErrorListener />}
             <div className="relative flex min-h-screen flex-col bg-background">
               {children}
             </div>
