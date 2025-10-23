@@ -1,0 +1,563 @@
+{
+  "entities": {
+    "Startup": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Startup",
+      "type": "object",
+      "description": "Represents a startup company that Infinity Software invests in.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Startup entity."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the startup."
+        },
+        "description": {
+          "type": "string",
+          "description": "A brief description of the startup and its mission."
+        },
+        "industry": {
+          "type": "string",
+          "description": "The industry the startup operates in."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "description",
+        "industry"
+      ]
+    },
+    "Milestone": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Milestone",
+      "type": "object",
+      "description": "Represents a project milestone for a startup.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Milestone entity."
+        },
+        "startupId": {
+          "type": "string",
+          "description": "Reference to Startup. (Relationship: Startup 1:N Milestone)"
+        },
+        "title": {
+          "type": "string",
+          "description": "The title of the milestone."
+        },
+        "description": {
+          "type": "string",
+          "description": "A detailed description of the milestone."
+        },
+        "dueDate": {
+          "type": "string",
+          "description": "The due date for the milestone.",
+          "format": "date-time"
+        },
+        "status": {
+          "type": "string",
+          "description": "The current status of the milestone (e.g., 'In Progress', 'Completed', 'Pending')."
+        }
+      },
+      "required": [
+        "id",
+        "startupId",
+        "title",
+        "description",
+        "dueDate",
+        "status"
+      ]
+    },
+    "Course": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Course",
+      "type": "object",
+      "description": "Represents a course available to startups.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Course entity."
+        },
+        "title": {
+          "type": "string",
+          "description": "The title of the course."
+        },
+        "description": {
+          "type": "string",
+          "description": "A description of the course content."
+        },
+        "contentUrl": {
+          "type": "string",
+          "description": "URL to the course content or resources.",
+          "format": "uri"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "description",
+        "contentUrl"
+      ]
+    },
+    "Freelancer": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Freelancer",
+      "type": "object",
+      "description": "Represents a freelancer or tech graduate who can join projects.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Freelancer entity."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the freelancer."
+        },
+        "email": {
+          "type": "string",
+          "description": "The email address of the freelancer.",
+          "format": "email"
+        },
+        "skills": {
+          "type": "array",
+          "description": "List of skills possessed by the freelancer.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "email",
+        "skills"
+      ]
+    },
+    "Project": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Project",
+      "type": "object",
+      "description": "Represents a project that freelancers can join.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Project entity."
+        },
+        "startupId": {
+          "type": "string",
+          "description": "Reference to Startup. (Relationship: Startup 1:N Project)"
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the project."
+        },
+        "description": {
+          "type": "string",
+          "description": "A detailed description of the project."
+        },
+        "requiredSkills": {
+          "type": "array",
+          "description": "List of skills required for the project.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "freelancerIds": {
+          "type": "array",
+          "description": "References to Freelancers. (Relationship: Freelancer N:N Project)",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "startupId",
+        "name",
+        "description",
+        "requiredSkills"
+      ]
+    },
+    "Post": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Post",
+      "type": "object",
+      "description": "Represents a post in the Sound Sphere social space.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Post entity."
+        },
+        "userId": {
+          "type": "string",
+          "description": "Reference to User. (Relationship: User 1:N Post) - The user who created the post."
+        },
+        "content": {
+          "type": "string",
+          "description": "The content of the post."
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "The timestamp of when the post was created.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "content",
+        "timestamp"
+      ]
+    },
+    "User": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "User",
+      "type": "object",
+      "description": "Represents a user in the Sound Sphere social space (developer, designer, startup founder).",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the User entity."
+        },
+        "username": {
+          "type": "string",
+          "description": "The username of the user."
+        },
+        "profilePictureUrl": {
+          "type": "string",
+          "description": "URL to the user's profile picture.",
+          "format": "uri"
+        }
+      },
+      "required": [
+        "id",
+        "username"
+      ]
+    },
+    "Company": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Company",
+      "type": "object",
+      "description": "Represents a company that pays for the full-price service.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Company entity."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the company."
+        },
+        "contactEmail": {
+          "type": "string",
+          "description": "The contact email for the company.",
+          "format": "email"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "contactEmail"
+      ]
+    },
+    "Ticket": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Ticket",
+      "type": "object",
+      "description": "Represents a support ticket for a company.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Ticket entity."
+        },
+        "companyId": {
+          "type": "string",
+          "description": "Reference to Company. (Relationship: Company 1:N Ticket)"
+        },
+        "title": {
+          "type": "string",
+          "description": "The title of the ticket."
+        },
+        "description": {
+          "type": "string",
+          "description": "A detailed description of the issue."
+        },
+        "status": {
+          "type": "string",
+          "description": "The current status of the ticket (e.g., 'Open', 'In Progress', 'Resolved')."
+        }
+      },
+      "required": [
+        "id",
+        "companyId",
+        "title",
+        "description",
+        "status"
+      ]
+    },
+    "TeamMember": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "TeamMember",
+      "type": "object",
+      "description": "Represents a team member working on a company's project.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the TeamMember entity."
+        },
+        "companyId": {
+          "type": "string",
+          "description": "Reference to Company. (Relationship: Company 1:N TeamMember)"
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the team member."
+        },
+        "role": {
+          "type": "string",
+          "description": "The role of the team member in the project."
+        }
+      },
+      "required": [
+        "id",
+        "companyId",
+        "name",
+        "role"
+      ]
+    }
+  },
+  "auth": {
+    "providers": [
+      "password",
+      "anonymous"
+    ]
+  },
+  "firestore": {
+    "structure": [
+      {
+        "path": "/startups/{startupId}",
+        "definition": {
+          "entityName": "Startup",
+          "schema": {
+            "$ref": "#/backend/entities/Startup"
+          },
+          "description": "Represents a startup company. The document ID is the startupId.",
+          "params": [
+            {
+              "name": "startupId",
+              "description": "The unique identifier for the startup."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/startups/{startupId}/milestones/{milestoneId}",
+        "definition": {
+          "entityName": "Milestone",
+          "schema": {
+            "$ref": "#/backend/entities/Milestone"
+          },
+          "description": "Represents a milestone for a startup. Requires the startupId in the path.",
+          "params": [
+            {
+              "name": "startupId",
+              "description": "The unique identifier for the startup."
+            },
+            {
+              "name": "milestoneId",
+              "description": "The unique identifier for the milestone."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/courses/{courseId}",
+        "definition": {
+          "entityName": "Course",
+          "schema": {
+            "$ref": "#/backend/entities/Course"
+          },
+          "description": "Represents a course available to startups.",
+          "params": [
+            {
+              "name": "courseId",
+              "description": "The unique identifier for the course."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/freelancers/{freelancerId}",
+        "definition": {
+          "entityName": "Freelancer",
+          "schema": {
+            "$ref": "#/backend/entities/Freelancer"
+          },
+          "description": "Represents a freelancer or tech graduate.",
+          "params": [
+            {
+              "name": "freelancerId",
+              "description": "The unique identifier for the freelancer."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/startups/{startupId}/projects/{projectId}",
+        "definition": {
+          "entityName": "Project",
+          "schema": {
+            "$ref": "#/backend/entities/Project"
+          },
+          "description": "Represents a project for a startup. Requires the startupId in the path.",
+          "params": [
+            {
+              "name": "startupId",
+              "description": "The unique identifier for the startup."
+            },
+            {
+              "name": "projectId",
+              "description": "The unique identifier for the project."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/users/{userId}",
+        "definition": {
+          "entityName": "User",
+          "schema": {
+            "$ref": "#/backend/entities/User"
+          },
+          "description": "Represents a user in the Sound Sphere social space. The document ID is the userId.",
+          "params": [
+            {
+              "name": "userId",
+              "description": "The unique identifier for the user."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/users/{userId}/posts/{postId}",
+        "definition": {
+          "entityName": "Post",
+          "schema": {
+            "$ref": "#/backend/entities/Post"
+          },
+          "description": "Represents a post made by a user in the Sound Sphere social space. Requires the userId in the path.",
+          "params": [
+            {
+              "name": "userId",
+              "description": "The unique identifier for the user."
+            },
+            {
+              "name": "postId",
+              "description": "The unique identifier for the post."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/companies/{companyId}",
+        "definition": {
+          "entityName": "Company",
+          "schema": {
+            "$ref": "#/backend/entities/Company"
+          },
+          "description": "Represents a company that pays for the full-price service. The document ID is the companyId.",
+          "params": [
+            {
+              "name": "companyId",
+              "description": "The unique identifier for the company."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/companies/{companyId}/tickets/{ticketId}",
+        "definition": {
+          "entityName": "Ticket",
+          "schema": {
+            "$ref": "#/backend/entities/Ticket"
+          },
+          "description": "Represents a support ticket for a company. Requires the companyId in the path.",
+          "params": [
+            {
+              "name": "companyId",
+              "description": "The unique identifier for the company."
+            },
+            {
+              "name": "ticketId",
+              "description": "The unique identifier for the ticket."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/companies/{companyId}/teamMembers/{teamMemberId}",
+        "definition": {
+          "entityName": "TeamMember",
+          "schema": {
+            "$ref": "#/backend/entities/TeamMember"
+          },
+          "description": "Represents a team member working on a company's project. Requires the companyId in the path.",
+          "params": [
+            {
+              "name": "companyId",
+              "description": "The unique identifier for the company."
+            },
+            {
+              "name": "teamMemberId",
+              "description": "The unique identifier for the team member."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/users/{userId}/signals/{signalId}",
+        "definition": {
+          "entityName": "Signal",
+          "schema": {
+            "$ref": "#/backend/entities/Signal"
+          },
+          "description": "Represents a user-specific signal or notification. Path-based ownership.",
+          "params": [
+            {
+              "name": "userId",
+              "description": "The unique identifier for the user."
+            },
+            {
+              "name": "signalId",
+              "description": "The unique identifier for the signal."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/startups/{startupId}/signals/{signalId}",
+        "definition": {
+          "entityName": "Signal",
+          "schema": {
+            "$ref": "#/backend/entities/Signal"
+          },
+          "description": "Represents a startup-specific signal or notification. Includes denormalized 'startupMembers' map for authorization independence.",
+          "params": [
+            {
+              "name": "startupId",
+              "description": "The unique identifier for the startup."
+            },
+            {
+              "name": "signalId",
+              "description": "The unique identifier for the signal."
+            }
+          ]
+        }
+      }
+    ],
+    "reasoning": "The Firestore structure is designed to address the 'FirestorePermissionError' during the `list` operation on the `/signals` collection. The core principle is Authorization Independence, achieved through structural segregation and explicit access modeling using dedicated collections. The structure addresses the QAPs requirements.\n\n1.  **Authorization Independence & QAPs:** The error indicates a missing permission to `list` the `/signals` collection. Given the application features, `signals` likely contains notification or status update data. To ensure secure `list` operations and atomic transactions, we segregate the `signals` data based on user ownership and group ownership. Thus, we will have dedicated collections like `/users/{userId}/signals`, and `/startups/{startupId}/signals`.\n\n2.  **Structural Segregation:**\n    *   User-specific signals are stored under `/users/{userId}/signals/{signalId}`. This allows simple rules to grant access to the owner (`request.auth.uid == userId`).\n    *   Startup-specific signals are stored under `/startups/{startupId}/signals/{signalId}`.  Access to these signals is managed by a `members` map within the startup document. This map is then denormalized to the signals documents via a `startupMembers` map.\n\n3.  **Access Modeling:**\n    *   **Private Data:** User-specific signals use path-based ownership.\n    *   **Collaborative Data:** Startup-specific signals use the Membership Map model. The `startupMembers` map (denormalized) grants access based on the user's role within the startup.\n\n4.  **Data Clarity:** The `status` field is used to explicitly represent the state of milestones and tickets. This avoids inferring state from multiple fields and improves debuggability.\n\n5.  **Addressing the Specific Error:** The original error was caused by attempting to list the signals collection without proper authorization. The new structure moves away from a single `/signals` collection to user-specific and startup-specific collections with more restricted `list` access. To resolve the specific error, the client code attempting to `list` `/signals` should be updated to query either `/users/{userId}/signals` or `/startups/{startupId}/signals` as appropriate, and security rules should be updated to reflect the new structure.\n"
+  }
+}

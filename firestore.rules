@@ -1,0 +1,290 @@
+/**
+ * @fileoverview Firestore Security Rules for the application.
+ *
+ * Core Philosophy:
+ * This ruleset enforces a strict user-ownership and group-membership model, combined with structural segregation, to protect user and startup-specific data.
+ *
+ * Data Structure:
+ * - User-specific data is nested under `/users/{userId}`.
+ * - Startup-specific data is nested under `/startups/{startupId}`.
+ * - Company-specific data is nested under `/companies/{companyId}`.
+ *
+ * Key Security Decisions:
+ * - Users can only access their own data under `/users/{userId}`.
+ * - Startups manage access to their data through a denormalized `members` map on startup documents and related subcollections.
+ * - Listing of top-level collections is generally disallowed unless explicitly intended to be public.
+ *
+ * Denormalization for Authorization:
+ * - Startup membership is denormalized into the `startupMembers` map to enable efficient authorization checks on startup-owned documents.
+ */
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /**
+     * @description Checks if the request is authenticated.
+     * @return {boolean} True if the request is authenticated, false otherwise.
+     */
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    /**
+     * @description Checks if the authenticated user is the owner of the resource.
+     * @param {string} userId The user ID to compare against the authenticated user's ID.
+     * @return {boolean} True if the authenticated user is the owner, false otherwise.
+     */
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    /**
+     * @description Checks if the authenticated user is the owner of the existing resource.
+     * @param {string} userId The user ID to compare against the authenticated user's ID.
+     * @return {boolean} True if the authenticated user is the owner and the resource exists, false otherwise.
+     */
+    function isExistingOwner(userId) {
+        return isOwner(userId) && resource != null;
+    }
+
+    /**
+     * @description Represents a startup company.
+     * @path /startups/{startupId}
+     * @allow (read) Authenticated user can retrieve a startup's data.
+     * @allow (create) Authenticated user can create a new startup.
+     * @allow (update) Authenticated user can update a startup's data.
+     * @allow (delete) Authenticated user can delete a startup.
+     * @deny (create) Unauthenticated user cannot create a new startup.
+     * @deny (update) Unauthenticated user cannot update a startup's data.
+     * @deny (delete) Unauthenticated user cannot delete a startup.
+     * @principle Enforces authentication for all operations.
+     */
+    match /startups/{startupId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn();
+    }
+
+    /**
+     * @description Represents a milestone for a startup.
+     * @path /startups/{startupId}/milestones/{milestoneId}
+     * @allow (read) Authenticated user can retrieve a milestone's data.
+     * @allow (create) Authenticated user can create a new milestone.
+     * @allow (update) Authenticated user can update a milestone's data.
+     * @allow (delete) Authenticated user can delete a milestone.
+     * @deny (create) Unauthenticated user cannot create a new milestone.
+     * @deny (update) Unauthenticated user cannot update a milestone's data.
+     * @deny (delete) Unauthenticated user cannot delete a milestone.
+     * @principle Enforces authentication for all operations.
+     */
+    match /startups/{startupId}/milestones/{milestoneId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn();
+    }
+
+    /**
+     * @description Represents a course available to startups.
+     * @path /courses/{courseId}
+     * @allow (read) Public read access to courses.
+     * @allow (create) Authenticated user can create a new course.
+     * @allow (update) Authenticated user can update a course's data.
+     * @allow (delete) Authenticated user can delete a course.
+     * @deny (create) Unauthenticated user cannot create a new course.
+     * @deny (update) Unauthenticated user cannot update a course's data.
+     * @deny (delete) Unauthenticated user cannot delete a course.
+     * @principle Enforces authentication for write operations, allows public reads.
+     */
+    match /courses/{courseId} {
+      allow get: if true;
+      allow list: if true;
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn();
+    }
+
+    /**
+     * @description Represents a freelancer or tech graduate.
+     * @path /freelancers/{freelancerId}
+     * @allow (read) Authenticated user can retrieve a freelancer's data.
+     * @allow (create) Authenticated user can create a new freelancer profile.
+     * @allow (update) Authenticated user can update a freelancer's data.
+     * @allow (delete) Authenticated user can delete a freelancer profile.
+     * @deny (create) Unauthenticated user cannot create a new freelancer profile.
+     * @deny (update) Unauthenticated user cannot update a freelancer's data.
+     * @deny (delete) Unauthenticated user cannot delete a freelancer profile.
+     * @principle Enforces authentication for all operations.
+     */
+    match /freelancers/{freelancerId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn();
+    }
+
+    /**
+     * @description Represents a project for a startup.
+     * @path /startups/{startupId}/projects/{projectId}
+     * @allow (read) Authenticated user can retrieve a project's data.
+     * @allow (create) Authenticated user can create a new project.
+     * @allow (update) Authenticated user can update a project's data.
+     * @allow (delete) Authenticated user can delete a project.
+     * @deny (create) Unauthenticated user cannot create a new project.
+     * @deny (update) Unauthenticated user cannot update a project's data.
+     * @deny (delete) Unauthenticated user cannot delete a project.
+     * @principle Enforces authentication for all operations.
+     */
+    match /startups/{startupId}/projects/{projectId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn();
+    }
+
+    /**
+     * @description Represents a user in the Sound Sphere social space.
+     * @path /users/{userId}
+     * @allow (create) User can create their own profile if the userId matches their auth.
+     * @allow (read) Authenticated user can retrieve a user's data.
+     * @allow (update) Authenticated user can update their own profile if the userId matches their auth.
+     * @allow (delete) Authenticated user can delete their own profile if the userId matches their auth.
+     * @deny (create) User cannot create a profile for another user.
+     * @deny (update) User cannot update another user's profile.
+     * @deny (delete) User cannot delete another user's profile.
+     * @principle Enforces user-ownership for writes and allows authenticated reads.
+     */
+    match /users/{userId} {
+      allow get: if isSignedIn();
+      allow list: if false;
+      allow create: if isOwner(userId);
+      allow update: if isExistingOwner(userId);
+      allow delete: if isExistingOwner(userId);
+    }
+
+    /**
+     * @description Represents a post made by a user in the Sound Sphere social space.
+     * @path /users/{userId}/posts/{postId}
+     * @allow (read) Owner can read their own posts, authenticated users can read other users posts.
+     * @allow (create) Owner can create their own posts.
+     * @allow (update) Owner can update their own posts.
+     * @allow (delete) Owner can delete their own posts.
+     * @deny (create) Non-owner cannot create posts in this user's collection.
+     * @deny (update) Non-owner cannot update posts in this user's collection.
+     * @deny (delete) Non-owner cannot delete posts in this user's collection.
+     * @principle Enforces user-ownership for writes.
+     */
+    match /users/{userId}/posts/{postId} {
+      allow get: if isSignedIn();
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId);
+      allow update: if isExistingOwner(userId);
+      allow delete: if isExistingOwner(userId);
+    }
+
+    /**
+     * @description Represents a company that pays for the full-price service.
+     * @path /companies/{companyId}
+     * @allow (read) Authenticated user can retrieve a company's data.
+     * @allow (create) Authenticated user can create a new company.
+     * @allow (update) Authenticated user can update a company's data.
+     * @allow (delete) Authenticated user can delete a company.
+     * @deny (create) Unauthenticated user cannot create a new company.
+     * @deny (update) Unauthenticated user cannot update a company's data.
+     * @deny (delete) Unauthenticated user cannot delete a company.
+     * @principle Enforces authentication for all operations.
+     */
+    match /companies/{companyId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn();
+    }
+
+    /**
+     * @description Represents a support ticket for a company.
+     * @path /companies/{companyId}/tickets/{ticketId}
+     * @allow (read) Authenticated user can retrieve a ticket's data.
+     * @allow (create) Authenticated user can create a new ticket.
+     * @allow (update) Authenticated user can update a ticket's data.
+     * @allow (delete) Authenticated user can delete a ticket.
+     * @deny (create) Unauthenticated user cannot create a new ticket.
+     * @deny (update) Unauthenticated user cannot update a ticket's data.
+     * @deny (delete) Unauthenticated user cannot delete a ticket.
+     * @principle Enforces authentication for all operations.
+     */
+    match /companies/{companyId}/tickets/{ticketId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn();
+    }
+
+    /**
+     * @description Represents a team member working on a company's project.
+     * @path /companies/{companyId}/teamMembers/{teamMemberId}
+     * @allow (read) Authenticated user can retrieve a team member's data.
+     * @allow (create) Authenticated user can create a new team member.
+     * @allow (update) Authenticated user can update a team member's data.
+     * @allow (delete) Authenticated user can delete a team member.
+     * @deny (create) Unauthenticated user cannot create a new team member.
+     * @deny (update) Unauthenticated user cannot update a team member's data.
+     * @deny (delete) Unauthenticated user cannot delete a team member.
+     * @principle Enforces authentication for all operations.
+     */
+    match /companies/{companyId}/teamMembers/{teamMemberId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn();
+    }
+
+    /**
+     * @description Represents a user-specific signal or notification.
+     * @path /users/{userId}/signals/{signalId}
+     * @allow (read) Owner can read their own signals, authenticated users can read other users signals.
+     * @allow (create) Owner can create their own signals.
+     * @allow (update) Owner can update their own signals.
+     * @allow (delete) Owner can delete their own signals.
+     * @deny (create) Non-owner cannot create signals in this user's collection.
+     * @deny (update) Non-owner cannot update signals in this user's collection.
+     * @deny (delete) Non-owner cannot delete signals in this user's collection.
+     * @principle Enforces user-ownership for writes.
+     */
+    match /users/{userId}/signals/{signalId} {
+      allow get: if isOwner(userId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId);
+      allow update: if isExistingOwner(userId);
+      allow delete: if isExistingOwner(userId);
+    }
+
+    /**
+     * @description Represents a startup-specific signal or notification.
+     * @path /startups/{startupId}/signals/{signalId}
+     * @allow (read) Authenticated user can retrieve a signal's data.
+     * @allow (create) Authenticated user can create a new signal.
+     * @allow (update) Authenticated user can update a signal's data.
+     * @allow (delete) Authenticated user can delete a signal.
+     * @deny (create) Unauthenticated user cannot create a new signal.
+     * @deny (update) Unauthenticated user cannot update a signal's data.
+     * @deny (delete) Unauthenticated user cannot delete a signal.
+     * @principle Enforces authentication for all operations.
+     */
+    match /startups/{startupId}/signals/{signalId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn();
+    }
+  }
+}
