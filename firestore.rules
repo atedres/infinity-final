@@ -2,311 +2,73 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    /**
-     * @description Grants the owner full access to their own user document.
-     * @path /users/{userId}
-     * @allow (create) - Authenticated user with UID matching the userId can create their user document.
-     * @allow (get, list, update, delete) - Authenticated user with UID matching the userId can read, update, and delete their user document.
-     * @deny (create) - Authenticated user attempts to create a user document with a userId that doesn't match their UID.
-     * @deny (get, list, update, delete) - Authenticated user attempts to read, update, or delete another user's document.
-     * @principle Enforces document ownership for writes.
-     */
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
     match /users/{userId} {
-      function isSignedIn() {
-        return request.auth != null;
-      }
-      function isOwner(userId) {
-        return request.auth.uid == userId;
-      }
-      function isExistingOwner(userId) {
-        return isOwner(userId) && resource.data != null;
-      }
-
-      allow get: if isSignedIn() && isOwner(userId);
-      allow list: if false;
-      allow create: if isSignedIn() && isOwner(userId);
-      allow update: if isSignedIn() && isOwner(userId);
-      allow delete: if isSignedIn() && isOwner(userId);
+      allow read, update, delete: if isSignedIn() && isOwner(userId);
+      allow create: if isSignedIn();
     }
 
-    /**
-     * @description Grants the owner full access to their own posts.
-     * @path /users/{userId}/posts/{postId}
-     * @allow (create) - Authenticated user with UID matching the userId can create a post in their user document.
-     * @allow (get, list, update, delete) - Authenticated user with UID matching the userId can read, update, and delete their own posts.
-     * @deny (create) - Authenticated user attempts to create a post with a userId that doesn't match their UID.
-     * @deny (get, list, update, or delete) - Authenticated user attempts to read, update, or delete another user's posts.
-     * @principle Enforces document ownership for writes and restricts access to a user's own data tree.
-     */
-    match /users/{userId}/posts/{postId} {
-      function isSignedIn() {
-        return request.auth != null;
-      }
-      function isOwner(userId) {
-        return request.auth.uid == userId;
-      }
-      function isExistingOwner(userId) {
-        return isOwner(userId) && resource.data != null;
+    match /users/{userId}/{subcollection}/{docId} {
+      allow read, write: if isSignedIn() && isOwner(userId);
+    }
+    
+    match /posts/{postId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && request.auth.uid == resource.data.authorId;
+
+      match /comments/{commentId} {
+        allow read, create: if isSignedIn();
+        allow update, delete: if isSignedIn() && (request.auth.uid == resource.data.authorId || request.auth.uid == get(/databases/$(database)/documents/posts/$(postId)).data.authorId);
+        
+        match /likes/{likeId} {
+          allow read, write: if isSignedIn();
+        }
       }
 
-      allow get: if isSignedIn() && isOwner(userId);
-      allow list: if isSignedIn() && isOwner(userId);
-      allow create: if isSignedIn() && isOwner(userId);
-      allow update: if isSignedIn() && isOwner(userId);
-      allow delete: if isSignedIn() && isOwner(userId);
+      match /likes/{likeId} {
+        allow read, write: if isSignedIn();
+      }
     }
 
-    /**
-     * @description Grants the owner full access to their own signals.
-     * @path /users/{userId}/signals/{signalId}
-     * @allow (create) - Authenticated user with UID matching the userId can create a signal in their user document.
-     * @allow (get, list, update, delete) - Authenticated user with UID matching the userId can read, update, and delete their own signals.
-     * @deny (create) - Authenticated user attempts to create a signal with a userId that doesn't match their UID.
-     * @deny (get, list, update, or delete) - Authenticated user attempts to read, update, or delete another user's signals.
-     * @principle Enforces document ownership for writes and restricts access to a user's own data tree.
-     */
-    match /users/{userId}/signals/{signalId} {
-      function isSignedIn() {
-        return request.auth != null;
-      }
-      function isOwner(userId) {
-        return request.auth.uid == userId;
-      }
-       function isExistingOwner(userId) {
-        return isOwner(userId) && resource.data != null;
-      }
+    match /audioRooms/{roomId} {
+      allow read, create: if isSignedIn();
+      allow update: if isSignedIn() && request.auth.uid == resource.data.creatorId;
+      // Let client logic handle deletion of subcollections for now
+      allow delete: if isSignedIn() && request.auth.uid == resource.data.creatorId;
 
-      allow get: if isSignedIn() && isOwner(userId);
-      allow list: if isSignedIn() && isOwner(userId);
-      allow create: if isSignedIn() && isOwner(userId);
-      allow update: if isSignedIn() && isOwner(userId);
-      allow delete: if isSignedIn() && isOwner(userId);
+      match /{subcollection}/{docId} {
+        allow read, write: if isSignedIn();
+      }
     }
 
-    /**
-     * @description Allows public read access to courses, but restricts write access.
-     * @path /courses/{courseId}
-     * @allow (get, list) - Any user, authenticated or not, can read the course data.
-     * @deny (create, update, delete) - No user can create, update, or delete courses. Write operations are not allowed in this prototype.
-     * @principle Allows public read access with no write access (read-only collection).
-     */
-    match /courses/{courseId} {
-      allow get: if true;
-      allow list: if true;
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
+    match /chats/{chatId} {
+      allow list: if isSignedIn() && request.auth.uid in request.query.where.participants;
+      allow read, write: if isSignedIn() && request.auth.uid in resource.data.participants;
+      
+      match /messages/{messageId} {
+        allow read, write: if isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+      }
     }
 
-    /**
-     * @description Grants read access to startups to anyone, but restricts write access to only authenticated users.
-     * @path /startups/{startupId}
-     * @allow (get, list) - Any user, authenticated or not, can read the startup data.
-     * @allow (create) - Only authenticated users can create a startup with the ID matching their UID.
-     * @allow (update, delete) - Only the owner of the startup can update or delete it.
-     * @deny (create) - Authenticated user attempts to create a startup with an ID that doesn't match their UID.
-     * @deny (update, delete) - Authenticated user attempts to update or delete a startup they don't own.
-     * @principle Enforces document ownership for writes.
-     */
-    match /startups/{startupId} {
-      function isSignedIn() {
-        return request.auth != null;
-      }
-      function isOwner(startupId) {
-        return request.auth.uid == startupId;
-      }
-      function isExistingOwner(startupId) {
-        return isOwner(startupId) && resource.data != null;
-      }
-
-      allow get: if true;
-      allow list: if true;
-      allow create: if isSignedIn() && request.auth.uid == startupId;
-      allow update: if isSignedIn() && isOwner(startupId);
-      allow delete: if isSignedIn() && isOwner(startupId);
+    match /notifications/{notificationId} {
+      allow get: if isSignedIn() && request.auth.uid == resource.data.recipientId;
+      allow list: if isSignedIn() && request.query.where.recipientId == request.auth.uid;
+      allow write: if isSignedIn();
     }
-
-    /**
-     * @description Grants access to milestones based on startup ownership.
-     * @path /startups/{startupId}/milestones/{milestoneId}
-     * @allow (get, list) - Any user can read milestones.
-     * @allow (create) - Only the owner of the startup can create a milestone.
-     * @allow (update, delete) - Only the owner of the startup can update or delete a milestone.
-     * @deny (create) - Authenticated user attempts to create a milestone for a startup they don't own.
-     * @deny (update, delete) - Authenticated user attempts to update or delete a milestone for a startup they don't own.
-     * @principle Enforces document ownership for writes.
-     */
-    match /startups/{startupId}/milestones/{milestoneId} {
-      function isSignedIn() {
-        return request.auth != null;
-      }
-      function isOwner(startupId) {
-        return get(/databases/$(database)/documents/startups/$(startupId)).data.uid == request.auth.uid;
-      }
-      function isExistingOwner(startupId) {
-        return isOwner(startupId) && resource.data != null;
-      }
-
-      allow get: if true;
-      allow list: if true;
-      allow create: if isSignedIn() && isOwner(startupId);
-      allow update: if isSignedIn() && isOwner(startupId);
-      allow delete: if isSignedIn() && isOwner(startupId);
-    }
-
-    /**
-     * @description Grants access to projects based on startup ownership.
-     * @path /startups/{startupId}/projects/{projectId}
-     * @allow (get, list) - Any user can read the project data.
-     * @allow (create) - Only the owner of the startup can create a project.
-     * @allow (update, delete) - Only the owner of the startup can update or delete a project.
-     * @deny (create) - Authenticated user attempts to create a project for a startup they don't own.
-     * @deny (update, delete) - Authenticated user attempts to update or delete a project for a startup they don't own.
-     * @principle Enforces document ownership for writes.
-     */
-    match /startups/{startupId}/projects/{projectId} {
-      function isSignedIn() {
-        return request.auth != null;
-      }
-     function isOwner(startupId) {
-        return get(/databases/$(database)/documents/startups/$(startupId)).data.uid == request.auth.uid;
-      }
-      function isExistingOwner(startupId) {
-        return isOwner(startupId) && resource.data != null;
-      }
-
-      allow get: if true;
-      allow list: if true;
-      allow create: if isSignedIn() && isOwner(startupId);
-      allow update: if isSignedIn() && isOwner(startupId);
-      allow delete: if isSignedIn() && isOwner(startupId);
-    }
-
-    /**
-     * @description Enforces role-based access control for startup-specific signals.
-     * @path /startups/{startupId}/signals/{signalId}
-     * @allow (get, list) - Allow anyone with the `startupMembers` role
-     * @allow (create, update, delete) - Only users with the 'admin' role in the startupMembers map can modify signals.
-     * @deny (create, update, delete) - Users without 'admin' role attempting to modify startup signals.
-     * @principle Role-based access control using a `startupMembers` map.
-     */
-    match /startups/{startupId}/signals/{signalId} {
-        function isSignedIn() {
-          return request.auth != null;
-        }
-        function isStartupMember(startupId) {
-          return get(/databases/$(database)/documents/startups/$(startupId)).data.members[request.auth.uid] != null;
-        }
-        function isAdmin(startupId) {
-          return get(/databases/$(database)/documents/startups/$(startupId)).data.members[request.auth.uid] == 'admin';
-        }
-        function isExistingStartupMember(startupId) {
-            return isStartupMember(startupId) && resource.data != null;
-        }
-      allow get: if isSignedIn() && isStartupMember(startupId);
-      allow list: if isSignedIn() && isStartupMember(startupId);
-      allow create: if isSignedIn() && isAdmin(startupId);
-      allow update: if isSignedIn() && isAdmin(startupId);
-      allow delete: if isSignedIn() && isAdmin(startupId);
-    }
-
-    /**
-     * @description Allows public read access to freelancers, but restricts write access.
-     * @path /freelancers/{freelancerId}
-     * @allow (get, list) - Any user, authenticated or not, can read the freelancer data.
-     * @deny (create, update, delete) - No user can create, update, or delete freelancers. Write operations are not allowed in this prototype.
-     * @principle Allows public read access with no write access (read-only collection).
-     */
-    match /freelancers/{freelancerId} {
-      allow get: if true;
-      allow list: if true;
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-     /**
-      * @description Grants read access to companies to anyone, but restricts write access to only authenticated users.
-      * @path /companies/{companyId}
-      * @allow (get, list) - Any user, authenticated or not, can read the company data.
-      * @allow (create) - Only authenticated users can create a company with the ID matching their UID.
-      * @allow (update, delete) - Only the owner of the company can update or delete it.
-      * @deny (create) - Authenticated user attempts to create a company with an ID that doesn't match their UID.
-      * @deny (update, delete) - Authenticated user attempts to update or delete a company they don't own.
-      * @principle Enforces document ownership for writes.
-      */
-    match /companies/{companyId} {
-        function isSignedIn() {
-          return request.auth != null;
-        }
-        function isOwner(companyId) {
-          return request.auth.uid == companyId;
-        }
-        function isExistingOwner(companyId) {
-            return isOwner(companyId) && resource.data != null;
-        }
-
-        allow get: if true;
-        allow list: if true;
-        allow create: if isSignedIn() && request.auth.uid == companyId;
-        allow update: if isSignedIn() && isOwner(companyId);
-        allow delete: if isSignedIn() && isOwner(companyId);
-    }
-
-    /**
-     * @description Grants access to tickets based on company ownership.
-     * @path /companies/{companyId}/tickets/{ticketId}
-     * @allow (get, list) - Any user can read the ticket data.
-     * @allow (create) - Only the owner of the company can create a ticket.
-     * @allow (update, delete) - Only the owner of the company can update or delete a ticket.
-     * @deny (create) - Authenticated user attempts to create a ticket for a company they don't own.
-     * @deny (update, delete) - Authenticated user attempts to update or delete a ticket for a company they don't own.
-     * @principle Enforces document ownership for writes.
-     */
-    match /companies/{companyId}/tickets/{ticketId} {
-        function isSignedIn() {
-          return request.auth != null;
-        }
-       function isOwner(companyId) {
-        return get(/databases/$(database)/documents/companies/$(companyId)).data.uid == request.auth.uid;
-      }
-        function isExistingOwner(companyId) {
-            return isOwner(companyId) && resource.data != null;
-        }
-
-        allow get: if true;
-        allow list: if true;
-        allow create: if isSignedIn() && isOwner(companyId);
-        allow update: if isSignedIn() && isOwner(companyId);
-        allow delete: if isSignedIn() && isOwner(companyId);
-    }
-
-    /**
-     * @description Grants access to team members based on company ownership.
-     * @path /companies/{companyId}/teamMembers/{teamMemberId}
-     * @allow (get, list) - Any user can read the team member data.
-     * @allow (create) - Only the owner of the company can create a team member.
-     * @allow (update, delete) - Only the owner of the company can update or delete a team member.
-     * @deny (create) - Authenticated user attempts to create a team member for a company they don't own.
-     * @deny (update, delete) - Authenticated user attempts to update or delete a team member for a company they don't own.
-     * @principle Enforces document ownership for writes.
-     */
-    match /companies/{companyId}/teamMembers/{teamMemberId} {
-        function isSignedIn() {
-          return request.auth != null;
-        }
-        function isOwner(companyId) {
-          return get(/databases/$(database)/documents/companies/$(companyId)).data.uid == request.auth.uid;
-        }
-        function isExistingOwner(companyId) {
-            return isOwner(companyId) && resource.data != null;
-        }
-
-        allow get: if true;
-        allow list: if true;
-        allow create: if isSignedIn() && isOwner(companyId);
-        allow update: if isSignedIn() && isOwner(companyId);
-        allow delete: if isSignedIn() && isOwner(companyId);
+    
+    match /signals/{signalId} {
+      allow get: if isSignedIn() && request.auth.uid == resource.data.to;
+      allow list: if isSignedIn() && request.query.where.to == request.auth.uid;
+      allow create: if isSignedIn();
+      allow delete: if isSignedIn() && (request.auth.uid == resource.data.to || request.auth.uid == resource.data.from);
     }
   }
 }
