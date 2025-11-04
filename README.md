@@ -49,6 +49,29 @@ These instructions will get you a copy of the project up and running on your loc
 
 ## Deployment
 
+### Deploying to Vercel (Recommended)
+
+Vercel is the easiest way to deploy your Next.js application.
+
+1.  **Sign up for Vercel**: Create an account at [vercel.com](https://vercel.com/signup), preferably by connecting your GitHub account.
+
+2.  **Import your project**: Once logged in, import your `infinity-final` repository from GitHub.
+
+3.  **Configure Environment Variables**: In your Vercel project's settings, navigate to the "Environment Variables" section. Add the same `NEXT_PUBLIC_` variables from your `.env.local` file. This step is crucial for connecting your application to Firebase.
+
+    -   `NEXT_PUBLIC_FIREBASE_API_KEY`
+    -   `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`
+    -   `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
+    -   `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET`
+    -   `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`
+    -   `NEXT_PUBLIC_FIREBASE_APP_ID`
+
+4.  **Deploy**: Vercel will automatically detect that you are deploying a Next.js application and configure the build settings for you. Click the "Deploy" button.
+
+That's it! Vercel will build and deploy your application, and you will get a public URL for your live site. It will also automatically redeploy your project every time you push new commits to your GitHub repository.
+
+### Alternative: Deploying to Firebase Hosting
+
 To deploy the application, you can use Firebase Hosting.
 
 1. Install the Firebase CLI:
@@ -65,4 +88,3 @@ To deploy the application, you can use Firebase Hosting.
    ```bash
    firebase deploy
    ```
-
